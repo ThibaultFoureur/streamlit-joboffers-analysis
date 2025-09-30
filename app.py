@@ -237,14 +237,14 @@ if check_password():
 
     # --- Initialisation de l'état de session pour la navigation ---
     if 'page' not in st.session_state:
-        st.session_state.page = 'Synthèse des compétences'
+        st.session_state.page = 'Décomposition des offres'
 
     # --- Navigation entre les pages ---
     st.sidebar.header("Navigation")
-    if st.sidebar.button("Synthèse des compétences", key="nav_competences"):
-        st.session_state.page = 'Synthèse des compétences'
     if st.sidebar.button("Décomposition des offres", key="nav_decomposition"):
         st.session_state.page = 'Décomposition des offres'
+    if st.sidebar.button("Synthèse des compétences", key="nav_competences"):
+        st.session_state.page = 'Synthèse des compétences'
     if st.sidebar.button("Données brutes", key="nav_donnees"):
         st.session_state.page = 'Données brutes'
 
