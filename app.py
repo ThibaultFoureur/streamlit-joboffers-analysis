@@ -33,8 +33,6 @@ if check_password():
 
     def categorize_seniority(seniority_list):
         """Crée une catégorie de séniorité unique à partir d'une liste."""
-        if not isinstance(seniority_list, list) or not seniority_list:
-            return "Non renseigné"
         if 'Non renseigné' in seniority_list:
             return "Non renseigné"
         if 'lead' in seniority_list:
@@ -333,7 +331,7 @@ if check_password():
         col1, col2 = st.columns(2)
         with col1:
             st.header("Intitulés de poste")
-            plot_top_keywords_plotly(df_display, 'work_titles', top_n=20, title="Top des intitulés de poste")
+            plot_top_keywords_plotly(df_display, 'work_titles', top_n=15, title="Top des intitulés de poste")
         with col2:
             st.header("Seniorités")
             plot_seniorites_pie(df_display)
@@ -343,7 +341,7 @@ if check_password():
         col1, col2 = st.columns(2)
         with col1:
             st.header("Type de contrat")
-            plot_value_counts_plotly(df_display, 'schedule_type', top_n=20, title="Top des types de contrats")
+            plot_value_counts_plotly(df_display, 'schedule_type', top_n=15, title="Top des types de contrats")
         with col2:
             st.header("Consulting")
             plot_consulting_pie(df_display)
@@ -353,7 +351,7 @@ if check_password():
         col1, col2 = st.columns(2)
         with col1:
             st.header("Top categorie d'entreprise")
-            plot_value_counts_plotly(df_display, 'categorie_entreprise', top_n=20, title="Top des catégorie")
+            plot_value_counts_plotly(df_display, 'categorie_entreprise', top_n=15, title="Top des catégorie")
         with col2:
             st.header("Salaires")
             plot_salary_pie(df_display)
@@ -363,10 +361,10 @@ if check_password():
         col1, col2 = st.columns(2)
         with col1:
             st.header("Analyse des entreprises")
-            plot_value_counts_plotly(df_display, 'company_name', top_n=20, title="Top entreprises")
+            plot_value_counts_plotly(df_display, 'company_name', top_n=15, title="Top entreprises")
         with col2:
             st.header("Top activite")
-            plot_value_counts_plotly(df_display, 'section_activite_principale_detail', top_n=20, title="Top des activités")
+            plot_value_counts_plotly(df_display, 'section_activite_principale_detail', top_n=15, title="Top des activités")
 
         st.markdown("---") 
 
