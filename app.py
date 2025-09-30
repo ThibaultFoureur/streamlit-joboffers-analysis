@@ -35,6 +35,8 @@ if check_password():
         """Crée une catégorie de séniorité unique à partir d'une liste."""
         if not isinstance(seniority_list, list) or not seniority_list:
             return "Non renseigné"
+        if 'Non renseigné' in seniority_list:
+            return "Non renseigné"
         if 'lead' in seniority_list:
             return "Lead"
         if 'senior' in seniority_list:
@@ -42,9 +44,11 @@ if check_password():
         if 'alternance' in seniority_list:
             return "Alternance"
         if 'junior' in seniority_list:
-            return "junior"
+            return "Junior"
+        if 'stage' in seniority_list:
+            return "Stage"
         # Ajoutez d'autres cas si nécessaire (ex: junior)
-        return "Non renseigné"
+        return "Autre"
 
     # --- Chargement et préparation des données (avec mise en cache) ---
     @st.cache_data
