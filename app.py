@@ -44,7 +44,7 @@ if check_password():
         if 'junior' in seniority_list:
             return "junior"
         # Ajoutez d'autres cas si nécessaire (ex: junior)
-        return "Autre"
+        return "Non renseigné"
 
     # --- Chargement et préparation des données (avec mise en cache) ---
     @st.cache_data
