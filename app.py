@@ -26,11 +26,10 @@ if check_password():
 
     def categorize_seniority(seniority_list):
         if 'Non renseigné' in seniority_list: return "Non renseigné"
-        if 'lead' in seniority_list: return "Lead"
-        if 'senior' in seniority_list: return "Senior"
-        if 'alternance' in seniority_list: return "Alternance"
+        if 'Stagiaire/Alternant' in seniority_list: return "Stagiaire/Alternant"
+        if 'Senior/Expert' in seniority_list: return "Senior/Expert"
+        if 'Lead/Manager' in seniority_list: return "Lead/Manager"
         if 'junior' in seniority_list: return "Junior"
-        if 'stage' in seniority_list: return "Stage"
         return "Autre"
 
     @st.cache_data
@@ -75,7 +74,7 @@ if check_password():
     # ... (les autres fonctions de plotting restent identiques) ...
     def plot_seniorites_pie(df_to_plot):
         seniority_counts = df_to_plot['seniority_category'].value_counts()
-        color_map = {'Senior': '#F6FF47', 'Lead': '#FF6347', 'Non renseigné': '#3FD655', 'Alternance': "#7A8C8D", 'junior': "#3FCCD6", 'Autre': 'blue'}
+        color_map = {'Senior/Expert': '#F6FF47', 'Lead/Manager': '#FF6347', 'Non renseigné': '#3FD655', 'Stagiaire/Alternant': "#7A8C8D", 'Junior': "#3FCCD6", 'Autre': 'blue'}
         fig = px.pie(values=seniority_counts.values, names=seniority_counts.index, title="Répartition des niveaux de séniorité", color=seniority_counts.index, color_discrete_map=color_map)
         st.plotly_chart(fig, use_container_width=True)
 
@@ -160,10 +159,9 @@ if check_password():
     PRESET_THIBAULT = {
         'consulting': 'Poste interne',
         'schedule': 'À plein temps',
-        'seniority_category': ["Senior", "Non renseigné"],
+        'seniority_category': ["Senior/Expert", "Non renseigné"],
         'titles': [
-            "Data analyst", "Analyste de données", "Analyste décisionnel", "Business Analyst",
-            "Power BI", "Analytics Engineer", "Développeur BI", "Business Intelligence", "Ingénieur BI"
+            "Spécialiste BI/Décisionnel", "Analytics Engineer", "Business/Functional Analyst", "Data Analyst"
             ],
         'category_company': ['GE','PME'],
         'sector': 'Tous les secteurs', # Non spécifié, donc on garde le défaut
