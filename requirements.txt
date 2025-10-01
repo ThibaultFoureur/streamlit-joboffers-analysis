@@ -6,3 +6,4 @@ dbt-postgres
 supabase
 python-dotenv
 serpapi
+google-search-results

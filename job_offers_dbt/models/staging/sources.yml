@@ -1,0 +1,9 @@
+version: 2
+
+sources:
+  - name: public
+    schema: public
+    tables:
+      - name: raw_jobs
+      - name: raw_companies
+      

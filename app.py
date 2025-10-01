@@ -6,84 +6,53 @@ import os
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import ast
 
 st.set_page_config(layout="wide")
 
-# --- Protection par mot de passe ---
+# --- Password Protection ---
 def check_password():
-    if "password_correct" in st.session_state and st.session_state["password_correct"]:
+    if st.session_state.get("password_correct", False):
         return True
-
     st.header("🔑 Accès Protégé")
-    password = st.text_input("Veuillez entrer le mot de passe pour accéder au dashboard.", type="password")
-
+    password = st.text_input("Veuillez entrer le mot de passe...", type="password")
     if password == st.secrets.get("PASSWORD", "default_password"):
         st.session_state["password_correct"] = True
         st.rerun()
-        return True
     elif password:
         st.error("Mot de passe incorrect.")
-    
     return False
 
-# --- Lancement de l'application ---
+# --- Main Application Logic ---
 if check_password():
-    # --- Fonctions de préparation et de plotting ---
 
-    def categorize_seniority(seniority_list):
-        if 'Non renseigné' in seniority_list: return "Non renseigné"
-        if 'Stagiaire/Alternant' in seniority_list: return "Stagiaire/Alternant"
-        if 'Senior/Expert' in seniority_list: return "Senior/Expert"
-        if 'Lead/Manager' in seniority_list: return "Lead/Manager"
-        if 'Junior' in seniority_list: return "Junior"
-        return "Autre"
-
+    # --- Data Loading (Simplified) ---
     @st.cache_data
-    def load_and_prepare_data(path):
-        df = pd.read_csv(path)
-        skill_columns = ['outils_bi', 'langages', 'cloud', 'modelisation', 'work_titles', 'type_contrat', 'seniorites']
-        
-        def convert_string_to_list(val):
-            if pd.isna(val) or not isinstance(val, str) or not val.startswith('['):
-                return ["Non renseigné"]
-            try:
-                result = ast.literal_eval(val)
-                return result if result else ["Non renseigné"]
-            except:
-                return ["Non renseigné"]
-
-        for col in skill_columns:
-            if col in df.columns:
-                df[col] = df[col].apply(convert_string_to_list)
-        
-        df['salaire_present'] = df['salary'].notna()
-        df['seniority_category'] = df['seniorites'].apply(categorize_seniority)
-        
+    def load_data_from_supabase():
+        """Loads the final, clean data from the dbt model in Supabase."""
+        print("Loading data from Supabase...")
+        conn = st.connection("supabase", type=SupabaseConnection)
+        # Query the final dbt model
+        response = conn.client.table("analytics_job_offers").select("*").execute()
+        df = pd.DataFrame(response.data)
         return df
 
-    # --- FONCTION DE SCORING MISE À JOUR ---
+    # --- Match Score Calculation (Stays in Streamlit) ---
     def calculate_match_score(row, profile):
         score = 0
-        
-        # +10 points for a matching job title
-        if any(title in row['work_titles'] for title in profile['target_roles']):
+        if any(title in row['work_titles_final'] for title in profile.get('target_roles', [])):
             score += 10
         
-        # +3 for each matching skill
-        all_job_skills = set(row['langages'] + row['outils_bi'] + row['cloud'] + row['modelisation'])
-        for skill in profile['my_skills']:
+        all_job_skills = set(row['languages'] + row['bi_tools'] + row['cloud_platforms'])
+        for skill in profile.get('my_skills', []):
             if skill in all_job_skills:
                 score += 3
 
-        # +5 for matching job info (seniority, consulting, schedule)
-        job_info = {row['seniority_category'], row['is_consulting_final'], row['schedule_type']}
-        if profile['all_job_info'] and not job_info.isdisjoint(profile['all_job_info']):
+        job_info = {row['seniority_category'], row['consulting_status'], row['schedule_type']}
+        if profile.get('all_job_info') and not job_info.isdisjoint(profile.get('all_job_info', [])):
              score += 5
 
-        # +5 for matching company info (category, sector)
-        company_info = {row['categorie_entreprise'], row['section_activite_principale_detail']}
-        if profile['all_company_info'] and not company_info.isdisjoint(profile['all_company_info']):
+        company_info = {row['company_category'], row['activity_section_details']}
+        if profile.get('all_company_info') and not company_info.isdisjoint(profile.get('all_company_info', [])):
             score += 5
             
         return score
@@ -96,10 +65,10 @@ if check_password():
         st.plotly_chart(fig, use_container_width=True)
 
     def plot_salary_pie(df_to_plot):
-        if df_to_plot['salaire_present'].dropna().empty:
+        if df_to_plot['is_salary_mentioned'].dropna().empty:
             st.info("Aucune donnée de salaire à afficher pour cette sélection.")
             return
-        salary_counts = df_to_plot['salaire_present'].value_counts()
+        salary_counts = df_to_plot['is_salary_mentioned'].value_counts()
         label_map = {True: 'Salaire Mentionné', False: 'Salaire Non Mentionné'}
         color_map = {True: '#3FD655', False: '#FF6347'}
         fig = px.pie(salary_counts, values=salary_counts.values, names=salary_counts.index.map(label_map), title="Transparence des salaires dans les offres", color=salary_counts.index, color_discrete_map=color_map)
@@ -107,10 +76,10 @@ if check_password():
         st.plotly_chart(fig, use_container_width=True)
 
     def plot_consulting_pie(df_to_plot):
-        if df_to_plot['is_consulting_final'].dropna().empty:
+        if df_to_plot['consulting_status'].dropna().empty:
             st.info("Aucune donnée à afficher pour la répartition du consulting avec cette sélection.")
             return
-        consulting_counts = df_to_plot['is_consulting_final'].value_counts()
+        consulting_counts = df_to_plot['consulting_status'].value_counts()
         label_map = {'Consulting': 'Consulting', 'Probablement consulting': 'Probablement consulting', 'Poste interne': 'Poste interne'}
         color_map = {'Consulting': '#FF6347', 'Probablement consulting': '#F6FF47', 'Poste interne': '#3FD655'}
         fig = px.pie(consulting_counts, values=consulting_counts.values, names=consulting_counts.index.map(label_map), title="Répartition du consulting", color=consulting_counts.index, color_discrete_map=color_map)
@@ -118,20 +87,17 @@ if check_password():
         st.plotly_chart(fig, use_container_width=True)
     
     def plot_top_keywords_plotly(df_to_plot, column_name, top_n=10, title=""):
+        # This function is now simpler because dbt provides clean arrays
         if column_name not in df_to_plot.columns or df_to_plot[column_name].dropna().empty:
             st.warning(f"Pas de données à afficher pour '{title}'.")
             return
         keywords = df_to_plot.explode(column_name)
+        # Filter out any placeholder values if they exist
+        keywords = keywords[keywords[column_name] != "Non renseigné"]
         keyword_counts = keywords[column_name].value_counts().nlargest(top_n).sort_values()
         if not keyword_counts.empty:
-            fig = px.bar(
-                keyword_counts, x=keyword_counts.values, y=keyword_counts.index,
-                orientation='h', title=title,
-                labels={'x': "Nombre d'offres", 'y': column_name.replace('_', ' ').capitalize()}, text_auto=True
-            )
+            fig = px.bar(keyword_counts, x=keyword_counts.values, y=keyword_counts.index, orientation='h', title=title)
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info(f"Aucune compétence trouvée pour '{title}' dans cette sélection.")
 
     def plot_value_counts_plotly(df_to_plot, column_name, top_n=10, title=""):
         if column_name not in df_to_plot.columns or df_to_plot[column_name].empty:
@@ -147,14 +113,14 @@ if check_password():
             st.info(f"Aucune donnée trouvée pour '{title}' dans cette sélection.")
 
 
-    # --- Chargement initial des données ---
+    # --- Initial Data Load ---
     try:
-        source_df = load_and_prepare_data('offres_emploi_data_enriched_with_company_info.csv')
-    except FileNotFoundError:
-        st.error("ERREUR : Fichier 'offres_emploi_data_enriched_with_company_info.csv' introuvable.")
+        source_df = load_data_from_supabase()
+    except Exception as e:
+        st.error(f"Erreur lors du chargement des données depuis Supabase: {e}")
         st.stop()
 
-    # --- Initialisation de l'état de session ---
+    # --- Session State Initialization ---
     if 'page' not in st.session_state:
         st.session_state.page = 'Décomposition des offres'
     if 'preset_active' not in st.session_state:
@@ -193,7 +159,7 @@ if check_password():
 
     # --- AFFICHAGE DES FILTRES ---
     st.sidebar.subheader("Filtres sur le poste")
-    is_consulting_options = ['Inclure tout'] + sorted(source_df['is_consulting_final'].dropna().unique().tolist())
+    is_consulting_options = ['Inclure tout'] + sorted(source_df['consulting_status'].dropna().unique().tolist())
     selected_is_consulting = st.sidebar.selectbox(
         'Filtrer par mention de consulting :', options=is_consulting_options,
         index=is_consulting_options.index(current_values['consulting'])
@@ -208,7 +174,7 @@ if check_password():
         'Choisir des niveaux de séniorité :', options=seniority_options,
         default=current_values['seniority_category']
     )
-    all_work_titles = sorted(source_df.explode('work_titles')['work_titles'].dropna().unique().tolist())
+    all_work_titles = sorted(source_df.explode('work_titles_final')['work_titles_final'].dropna().unique().tolist())
     if "Non renseigné" in all_work_titles: all_work_titles.remove("Non renseigné")
     selected_work_titles = st.sidebar.multiselect(
         'Choisir des intitulés spécifiques :', options=all_work_titles,
@@ -216,14 +182,14 @@ if check_password():
     )
     
     st.sidebar.subheader("Filtres sur la société")
-    category_options = ['Toutes les catégories'] + sorted(source_df['categorie_entreprise'].dropna().unique().tolist())
+    category_options = ['Toutes les catégories'] + sorted(source_df['company_category'].dropna().unique().tolist())
     selected_category_company = st.sidebar.multiselect(
         "Filtrer par catégorie d'entreprise :", options=category_options,
         default=current_values['category_company']
     )
     selected_sector_company = st.sidebar.selectbox(
         "Filtrer par secteur d'entreprise :",
-        options=['Tous les secteurs'] + sorted(source_df['section_activite_principale_detail'].dropna().unique().tolist())
+        options=['Tous les secteurs'] + sorted(source_df['activity_section_details'].dropna().unique().tolist())
     )
     selected_company = st.sidebar.selectbox(
         'Filtrer par entreprise :',
@@ -233,11 +199,11 @@ if check_password():
     # --- Application des filtres ---
     df_display = source_df.copy()
     if selected_is_consulting != 'Inclure tout':
-        df_display = df_display[df_display['is_consulting_final'] == selected_is_consulting]
+        df_display = df_display[df_display['consulting_status'] == selected_is_consulting]
     if selected_sector_company != 'Tous les secteurs':
-        df_display = df_display[df_display['section_activite_principale_detail'] == selected_sector_company]
+        df_display = df_display[df_display['activity_section_details'] == selected_sector_company]
     if selected_category_company:
-        df_display = df_display[df_display['categorie_entreprise'].isin(selected_category_company)]
+        df_display = df_display[df_display['company_category'].isin(selected_category_company)]
     if selected_company != 'Toutes les entreprises':
         df_display = df_display[df_display['company_name'] == selected_company]
     if selected_schedule_type != 'Tous les types':
@@ -245,7 +211,7 @@ if check_password():
     if selected_seniority:
         df_display = df_display[df_display['seniority_category'].isin(selected_seniority)]
     if selected_work_titles:
-        df_display = df_display[df_display['work_titles'].apply(
+        df_display = df_display[df_display['work_titles_final'].apply(
             lambda titles_in_row: any(title in titles_in_row for title in selected_work_titles)
         )]
         
@@ -258,11 +224,11 @@ if check_password():
         st.title("📊 Synthèse des compétences du marché")
         st.write(f"Analyse de **{len(df_display)}** offres d'emploi filtrées.")
         st.header("Compétences techniques les plus demandées")
-        plot_top_keywords_plotly(df_display, 'outils_bi', title="Top Outils BI / Solutions Techniques")
+        plot_top_keywords_plotly(df_display, 'bi_tools', title="Top Outils BI / Solutions Techniques")
         st.markdown("---") 
-        plot_top_keywords_plotly(df_display, 'langages', title="Top Langages Techniques")
+        plot_top_keywords_plotly(df_display, 'languages', title="Top Langages Techniques")
         st.markdown("---") 
-        plot_top_keywords_plotly(df_display, 'cloud', title="Top Plateformes Cloud & Data")
+        plot_top_keywords_plotly(df_display, 'cloud_platforms', title="Top Plateformes Cloud & Data")
         st.markdown("---") 
     elif st.session_state.page == 'Décomposition des offres':
         st.title("📄 Décomposition des offres")
@@ -270,7 +236,7 @@ if check_password():
         col1, col2 = st.columns(2)
         with col1:
             st.header("Intitulés de poste")
-            plot_top_keywords_plotly(df_display, 'work_titles', top_n=15, title="Top des intitulés de poste")
+            plot_top_keywords_plotly(df_display, 'work_titles_final', top_n=15, title="Top des intitulés de poste")
         with col2:
             st.header("Seniorités")
             plot_seniorites_pie(df_display)
@@ -286,7 +252,7 @@ if check_password():
         col1, col2 = st.columns(2)
         with col1:
             st.header("Top categorie d'entreprise")
-            plot_value_counts_plotly(df_display, 'categorie_entreprise', top_n=15, title="Top des catégorie")
+            plot_value_counts_plotly(df_display, 'company_category', top_n=15, title="Top des catégorie")
         with col2:
             st.header("Salaires")
             plot_salary_pie(df_display)
@@ -297,7 +263,7 @@ if check_password():
             plot_value_counts_plotly(df_display, 'company_name', top_n=15, title="Top entreprises")
         with col2:
             st.header("Top activite")
-            plot_value_counts_plotly(df_display, 'section_activite_principale_detail', top_n=15, title="Top des activités")
+            plot_value_counts_plotly(df_display, 'activity_section_details', top_n=15, title="Top des activités")
         st.markdown("---") 
 
     elif st.session_state.page == 'Données brutes':
@@ -321,21 +287,21 @@ if check_password():
 
             # Préparation des listes d'options pour les multiselects
             all_skills = sorted(list(set(
-                source_df.explode('langages')['langages'].dropna().unique().tolist() +
-                source_df.explode('outils_bi')['outils_bi'].dropna().unique().tolist() +
-                source_df.explode('cloud')['cloud'].dropna().unique().tolist() +
-                source_df.explode('modelisation')['modelisation'].dropna().unique().tolist()
+                source_df.explode('languages')['languages'].dropna().unique().tolist() +
+                source_df.explode('bi_tools')['bi_tools'].dropna().unique().tolist() +
+                source_df.explode('cloud_platforms')['cloud_platforms'].dropna().unique().tolist() +
+                source_df.explode('data_modelization')['data_modelization'].dropna().unique().tolist()
             )))
             if "Non renseigné" in all_skills: all_skills.remove("Non renseigné")
 
             all_job_info_options = sorted(list(set(
                 source_df['seniority_category'].dropna().unique().tolist() +
-                source_df['is_consulting_final'].dropna().unique().tolist() +
+                source_df['consulting_status'].dropna().unique().tolist() +
                 source_df['schedule_type'].dropna().unique().tolist()
             )))
             all_company_info_options = sorted(list(set(
-                source_df['categorie_entreprise'].dropna().unique().tolist() +
-                source_df['section_activite_principale_detail'].dropna().unique().tolist()
+                source_df['company_category'].dropna().unique().tolist() +
+                source_df['activity_section_details'].dropna().unique().tolist()
             )))
             
             # Widgets pour éditer le profil

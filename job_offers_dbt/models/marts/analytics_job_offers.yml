@@ -1,0 +1,83 @@
+version: 2
+
+models:
+  - name: analytics_job_offers
+    description: "The final, analysis-ready table containing enriched job offers. This is the primary table to be queried by the Streamlit application and other BI tools. It joins job and company information and applies final business logic."
+    
+    columns:
+      - name: job_id
+        description: "The unique identifier for the job offer. This serves as the primary key."
+        tests:
+          - unique
+          - not_null
+
+      - name: title
+        description: "The original title of the job offer."
+        tests:
+          - not_null
+
+      - name: company_name
+        description: "The name of the company posting the job."
+        tests:
+          - not_null
+
+      - name: company_category
+        description: "The size category of the company (e.g., PME, ETI, GE)."
+
+      - name: activity_section_details
+        description: "A human-readable description of the company's main business sector."
+
+      - name: location
+        description: "The geographical location of the job."
+
+      - name: via
+        description: "The platform or job board where the offer was originally found (e.g., 'LinkedIn', 'Welcome to the Jungle')."
+
+      - name: is_salary_mentioned
+        description: "A boolean flag that is TRUE if a salary was detected in the job posting."
+        tests:
+          - not_null
+
+      - name: salary
+        description: "The salary information, if available."
+
+      - name: schedule_type
+        description: "The type of employment contract (e.g., 'À plein temps', 'Temps partiel')."
+
+      - name: posted_at
+        description: "A string indicating when the job was posted (e.g., 'il y a 11 heures')."
+
+      - name: seniority_category
+        description: "The standardized seniority level for the role (e.g., 'Senior/Expert', 'Junior')."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Intern/Apprentice', 'Senior/Expert', 'Lead/Manager', 'Junior', 'Not specified']
+
+      - name: languages
+        description: "An array of programming language keywords found in the job's text."
+
+      - name: bi_tools
+        description: "An array of Business Intelligence tool keywords found in the job's text."
+
+      - name: cloud_platforms
+        description: "An array of cloud platform keywords found in the job's text."
+
+      - name: consulting_status
+        description: "The final, classified status of the job: 'Consulting', 'Probably consulting', or 'Internal position'."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Consulting', 'Probably consulting', 'Internal position']
+
+      - name: description
+        description: "The full, raw text description of the job offer."
+
+      - name: full_text
+        description: "A concatenation of the title and description, used for keyword searching."
+
+      - name: apply_link_1
+        description: "The primary application link for the job."
+
+      - name: apply_link_2
+        description: "A secondary application link, if available."

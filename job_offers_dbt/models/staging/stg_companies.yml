@@ -1,0 +1,25 @@
+version: 2
+
+models:
+  - name: stg_companies
+    description: "Cleans and structures raw company data. This model extracts key business information from the raw `company_info` JSON blob, such as activity codes and employee ranges."
+    columns:
+      - name: company_name
+        description: "The unique name of the company. This is the primary key."
+        tests:
+          - unique
+          - not_null
+      
+      - name: company_category
+        description: "The size category of the company (e.g., PME, GE)."
+
+      - name: employee_range
+        description: "The official salary employee range for the company."
+
+      - name: activity_section_details
+        description: "The human-readable description of the company's main activity sector."
+
+      - name: is_consulting_company
+        description: "A boolean flag that is TRUE if the company's main activity code corresponds to IT or business consulting."
+        tests:
+          - not_null
