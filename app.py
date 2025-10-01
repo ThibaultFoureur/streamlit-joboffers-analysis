@@ -1,3 +1,6 @@
+from st_supabase_connection import SupabaseConnection
+from datetime import date
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -289,17 +292,91 @@ if check_password():
             st.header("Top activite")
             plot_value_counts_plotly(df_display, 'section_activite_principale_detail', top_n=15, title="Top des activités")
         st.markdown("---") 
+
     elif st.session_state.page == 'Données brutes':
-        st.title("Explorer les offres")
+        st.title(" Explorer les offres")
         st.write(f"Affichage de **{len(df_display)}** offres d'emploi filtrées.")
-        st.data_editor(
-            df_display,
+        st.write(f"Attention : tout changement de status, contact_date et notes sera perdu si les filtres sont changés")
+
+        # --- 1. LOAD DATA & PREPARE DATAFRAME ---
+        # This section correctly merges the filtered data with your Supabase tracker.
+        conn = st.connection("supabase", type=SupabaseConnection)
+        response = conn.client.table("tracker").select("*").execute()
+        tracker_df = pd.DataFrame(response.data)
+        if tracker_df.empty:
+            tracker_df = pd.DataFrame(columns=['job_id', 'status', 'contact_date', 'notes'])
+        if 'contact_date' in tracker_df.columns:
+            tracker_df['contact_date'] = pd.to_datetime(tracker_df['contact_date']).dt.date
+
+        df_with_status = pd.merge(df_display, tracker_df, on="job_id", how="left")
+        df_prepared = df_with_status.copy()
+
+        if 'status' not in df_prepared.columns: df_prepared['status'] = None
+        if 'contact_date' not in df_prepared.columns: df_prepared['contact_date'] = None
+
+        desired_order = ['title', 'company_name', 'status', 'contact_date']
+        other_columns = [col for col in df_prepared.columns if col not in desired_order]
+        df_prepared = df_prepared[desired_order + other_columns]
+
+
+        # --- 2. SMART SESSION STATE INITIALIZATION (Corrected) ---
+        # This logic now checks if the filters have changed.
+        
+        # Get the unique identifiers of the jobs currently in the state (if any)
+        try:
+            current_ids_in_state = set(st.session_state.df_editor_state['job_id'])
+        except (KeyError, AttributeError):
+            current_ids_in_state = set()
+
+        # Get the unique identifiers of the jobs from the newly filtered dataframe
+        newly_filtered_ids = set(df_prepared['job_id'])
+
+        # If the state is not initialized OR if the set of job IDs has changed,
+        # we reset the state with the new, filtered data.
+        if 'df_editor_state' not in st.session_state or current_ids_in_state != newly_filtered_ids:
+            st.session_state.df_editor_state = df_prepared.copy()
+
+
+        # --- 3. DISPLAY THE DATA EDITOR, FED BY SESSION STATE ---
+        # This part remains the same, always reading from the now-correct session state
+        edited_df = st.data_editor(
+            st.session_state.df_editor_state,
             column_config={
                 "title": st.column_config.Column(pinned=True),
                 "company_name": st.column_config.Column(pinned=True),
-                "apply_link_1": st.column_config.LinkColumn("Lien pour postuler 1", help="Cliquez pour ouvrir le lien de l'offre", display_text="Postuler ici"),
-                "apply_link_2": st.column_config.LinkColumn("Lien pour postuler 2", help="Cliquez pour ouvrir le lien de l'offre", display_text="Postuler ici")
+                "status": st.column_config.SelectboxColumn(
+                    "Status", width="medium", options=["Contacted", "Refused", "Positive"],
+                    required=False, pinned=True,
+                ),
+                "contact_date": st.column_config.DateColumn("Contact Date"),
+                "apply_link_1": st.column_config.LinkColumn("Lien pour postuler 1"),
+                "job_id": None
             },
-            hide_index=True,
-            use_container_width=True
+            hide_index=True, use_container_width=True, key="job_editor"
         )
+
+        # --- 4. DETECT USER EDITS & APPLY AUTOMATIC LOGIC ---
+        # This logic remains the same
+        if not edited_df.equals(st.session_state.df_editor_state):
+            df_updates = edited_df.copy()
+            for index, row in df_updates.iterrows():
+                if index in st.session_state.df_editor_state.index:
+                    original_row = st.session_state.df_editor_state.loc[index]
+                    original_status = original_row['status'] if pd.notna(original_row['status']) else ""
+                    current_status = row['status'] if pd.notna(row['status']) else ""
+                    if current_status == 'Contacted' and original_status != 'Contacted':
+                        df_updates.loc[index, 'contact_date'] = date.today()
+            st.session_state.df_editor_state = df_updates.copy()
+            st.rerun()
+
+        # --- 5. SAVE THE FINAL STATE TO SUPABASE ---
+        # This logic remains the same
+        if st.button("Save My Progress to Supabase"):
+            updated_tracker = st.session_state.df_editor_state[["job_id", "status", "contact_date", "notes"]].copy()
+            updated_tracker.dropna(subset=['status'], inplace=True)
+            if 'contact_date' in updated_tracker.columns:
+                updated_tracker['contact_date'] = pd.to_datetime(updated_tracker['contact_date']).dt.strftime('%Y-%m-%d')
+            updated_tracker = updated_tracker.astype(object).where(pd.notnull(updated_tracker), None)
+            conn.client.table("tracker").upsert(updated_tracker.to_dict(orient="records")).execute()
+            st.success("Your application progress has been saved to Supabase! 🚀")
+            st.balloons()
