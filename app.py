@@ -3,6 +3,8 @@ import pandas as pd
 import plotly.express as px
 import ast
 
+st.set_page_config(layout="wide")
+
 # --- Protection par mot de passe ---
 def check_password():
     if "password_correct" in st.session_state and st.session_state["password_correct"]:
