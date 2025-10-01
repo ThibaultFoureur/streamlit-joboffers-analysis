@@ -2,3 +2,7 @@ pandas==2.3.2
 plotly==6.3.0
 streamlit==1.50.0
 st-supabase-connection
+dbt-postgres
+supabase
+python-dotenv
+serpapi
