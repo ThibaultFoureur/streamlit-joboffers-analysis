@@ -29,7 +29,20 @@ extracted_and_renamed as (
 final as (
 
     select
-        *,
+        company_name,
+        activity_section_code,
+        main_activity_code,
+        employee_range,
+        company_info,
+        created_at,
+
+        -- Translate company category from French abbreviations to English
+        CASE company_category
+            WHEN 'PME' THEN 'SME' -- Petite et Moyenne Entreprise -> Small and Medium-sized Enterprise
+            WHEN 'GE' THEN 'Large Enterprise' -- Grande Entreprise
+            WHEN 'ETI' THEN 'Intermediate-sized Enterprise' -- Entreprise de Taille Intermédiaire
+            ELSE company_category -- Fallback to the original value if not matched
+        END AS company_category,
 
         -- Map the activity section code to a human-readable description
         CASE activity_section_code

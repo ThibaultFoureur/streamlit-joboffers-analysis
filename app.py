@@ -13,13 +13,13 @@ st.set_page_config(layout="wide")
 def check_password():
     if st.session_state.get("password_correct", False):
         return True
-    st.header("🔑 Accès Protégé")
-    password = st.text_input("Veuillez entrer le mot de passe...", type="password")
+    st.header("🔑 Protected Access")
+    password = st.text_input("Please enter the password...", type="password")
     if password == st.secrets.get("PASSWORD", "default_password"):
         st.session_state["password_correct"] = True
         st.rerun()
     elif password:
-        st.error("Mot de passe incorrect.")
+        st.error("Incorrect password.")
     return False
 
 # --- Main Application Logic ---
@@ -39,7 +39,7 @@ if check_password():
                 df[col] = df[col].apply(lambda x: x if isinstance(x, list) else [])
         return df
 
-     # --- Match Score Calculation ---
+    # --- Match Score Calculation ---
     def calculate_match_score(row, profile):
         score = 0
         if any(title in row['work_titles_final'] for title in profile.get('target_roles', [])):
@@ -52,7 +52,7 @@ if check_password():
 
         job_info = {row.get('seniority_category'), row.get('consulting_status'), row.get('schedule_type')}
         if profile.get('all_job_info') and not job_info.isdisjoint(profile.get('all_job_info', [])):
-             score += 5
+                score += 5
 
         company_info = {row.get('company_category'), row.get('activity_section_details')}
         if profile.get('all_company_info') and not company_info.isdisjoint(profile.get('all_company_info', [])):
@@ -63,40 +63,41 @@ if check_password():
     # --- Plotting Functions ---
     def plot_seniorites_pie(df_to_plot):
         seniority_counts = df_to_plot['seniority_category'].value_counts()
-        color_map = {'Senior/Expert': '#F6FF47', 'Lead/Manager': '#FF6347', 'Non renseigné': '#3FD655', 'Stagiaire/Alternant': "#7A8C8D", 'Junior': "#3FCCD6", 'Autre': 'blue'}
-        fig = px.pie(values=seniority_counts.values, names=seniority_counts.index, title="Répartition des niveaux de séniorité", color=seniority_counts.index, color_discrete_map=color_map)
+        # Corrected values to match the English schema
+        color_map = {'Senior/Expert': '#F6FF47', 'Lead/Manager': '#FF6347', 'Not specified': '#3FD655', 'Intern/Apprentice': "#7A8C8D", 'Junior': "#3FCCD6", 'Other': 'blue'}
+        fig = px.pie(values=seniority_counts.values, names=seniority_counts.index, title="Seniority Level Distribution", color=seniority_counts.index, color_discrete_map=color_map)
         st.plotly_chart(fig, use_container_width=True)
 
     def plot_salary_pie(df_to_plot):
         if df_to_plot['is_salary_mentioned'].dropna().empty:
-            st.info("Aucune donnée de salaire à afficher pour cette sélection.")
+            st.info("No salary data to display for this selection.")
             return
         salary_counts = df_to_plot['is_salary_mentioned'].value_counts()
-        label_map = {True: 'Salaire Mentionné', False: 'Salaire Non Mentionné'}
+        label_map = {True: 'Salary Mentioned', False: 'Salary Not Mentioned'}
         color_map = {True: '#3FD655', False: '#FF6347'}
-        fig = px.pie(salary_counts, values=salary_counts.values, names=salary_counts.index.map(label_map), title="Transparence des salaires dans les offres", color=salary_counts.index, color_discrete_map=color_map)
+        fig = px.pie(salary_counts, values=salary_counts.values, names=salary_counts.index.map(label_map), title="Salary Transparency in Job Offers", color=salary_counts.index, color_discrete_map=color_map)
         fig.update_traces(textposition='inside', textinfo='percent+label')
         st.plotly_chart(fig, use_container_width=True)
 
     def plot_consulting_pie(df_to_plot):
         if df_to_plot['consulting_status'].dropna().empty:
-            st.info("Aucune donnée à afficher pour la répartition du consulting avec cette sélection.")
+            st.info("No data to display for the consulting distribution with this selection.")
             return
         consulting_counts = df_to_plot['consulting_status'].value_counts()
-        label_map = {'Consulting': 'Consulting', 'Probablement consulting': 'Probablement consulting', 'Poste interne': 'Poste interne'}
-        color_map = {'Consulting': '#FF6347', 'Probablement consulting': '#F6FF47', 'Poste interne': '#3FD655'}
-        fig = px.pie(consulting_counts, values=consulting_counts.values, names=consulting_counts.index.map(label_map), title="Répartition du consulting", color=consulting_counts.index, color_discrete_map=color_map)
+        label_map = {'Consulting': 'Consulting', 'Probably consulting': 'Probably consulting', 'Internal position': 'Internal position'}
+        color_map = {'Consulting': '#FF6347', 'Probably consulting': '#F6FF47', 'Internal position': '#3FD655'}
+        fig = px.pie(consulting_counts, values=consulting_counts.values, names=consulting_counts.index.map(label_map), title="Consulting Distribution", color=consulting_counts.index, color_discrete_map=color_map)
         fig.update_traces(textposition='inside', textinfo='percent+label')
         st.plotly_chart(fig, use_container_width=True)
     
     def plot_top_keywords_plotly(df_to_plot, column_name, top_n=10, title=""):
         # This function is now simpler because dbt provides clean arrays
         if column_name not in df_to_plot.columns or df_to_plot[column_name].dropna().empty:
-            st.warning(f"Pas de données à afficher pour '{title}'.")
+            st.warning(f"No data to display for '{title}'.")
             return
         keywords = df_to_plot.explode(column_name)
         # Filter out any placeholder values if they exist
-        keywords = keywords[keywords[column_name] != "Non renseigné"]
+        keywords = keywords[keywords[column_name] != "Not specified"]
         keyword_counts = keywords[column_name].value_counts().nlargest(top_n).sort_values()
         if not keyword_counts.empty:
             fig = px.bar(keyword_counts, x=keyword_counts.values, y=keyword_counts.index, orientation='h', title=title)
@@ -104,110 +105,111 @@ if check_password():
 
     def plot_value_counts_plotly(df_to_plot, column_name, top_n=10, title=""):
         if column_name not in df_to_plot.columns or df_to_plot[column_name].empty:
-            st.warning(f"Pas de données à afficher pour '{title}'.")
+            st.warning(f"No data to display for '{title}'.")
             return
-        series_to_plot = df_to_plot[column_name].fillna('Non spécifié')
+        series_to_plot = df_to_plot[column_name].fillna('Not specified')
         value_counts = series_to_plot.value_counts().nlargest(top_n).sort_values()
         if not value_counts.empty:
-            fig = px.bar(value_counts, x=value_counts.values, y=value_counts.index, orientation='h', title=title, labels={'x': "Nombre d'offres", 'y': column_name.replace('_', ' ').capitalize()}, text_auto=True)
+            fig = px.bar(value_counts, x=value_counts.values, y=value_counts.index, orientation='h', title=title, labels={'x': "Number of offers", 'y': column_name.replace('_', ' ').capitalize()}, text_auto=True)
             fig.update_layout(yaxis={'categoryorder':'total ascending'})
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info(f"Aucune donnée trouvée pour '{title}' dans cette sélection.")
+            st.info(f"No data found for '{title}' in this selection.")
 
 
     # --- Initial Data Load ---
     try:
         source_df = load_data_from_supabase()
     except Exception as e:
-        st.error(f"Erreur lors du chargement des données depuis Supabase: {e}")
+        st.error(f"Error loading data from Supabase: {e}")
         st.stop()
 
     # --- Session State Initialization ---
-    if 'page' not in st.session_state: st.session_state.page = 'Décomposition des offres'
+    if 'page' not in st.session_state: st.session_state.page = 'Job Offer Breakdown'
     if 'preset_active' not in st.session_state: st.session_state.preset_active = False
     if 'profile_preset_active' not in st.session_state: st.session_state.profile_preset_active = False
     if 'profile' not in st.session_state: st.session_state.profile = {}
     if 'last_profile' not in st.session_state: st.session_state.last_profile = {}
 
-    # --- Navigation entre les pages ---
+    # --- Page Navigation ---
     st.sidebar.header("Navigation")
-    if st.sidebar.button("Décomposition des offres", key="nav_decomposition"):
-        st.session_state.page = 'Décomposition des offres'
-    if st.sidebar.button("Synthèse des compétences", key="nav_competences"):
-        st.session_state.page = 'Synthèse des compétences'
-    if st.sidebar.button("Données brutes", key="nav_donnees"):
-        st.session_state.page = 'Données brutes'
+    if st.sidebar.button("Job Offer Breakdown", key="nav_breakdown"):
+        st.session_state.page = 'Job Offer Breakdown'
+    if st.sidebar.button("Skills Summary", key="nav_skills"):
+        st.session_state.page = 'Skills Summary'
+    if st.sidebar.button("Raw Data & Matching", key="nav_data"):
+        st.session_state.page = 'Raw Data & Matching'
 
-    # --- Barre latérale (Sidebar) ---
-    st.sidebar.header("Filtres")
-    st.sidebar.subheader("Presets de filtres")
-    st.sidebar.toggle("Recherche active de Thibault", key="preset_active")
+    # --- Sidebar ---
+    st.sidebar.header("Filters")
+    st.sidebar.subheader("Filter Presets")
+    st.sidebar.toggle("Thibault's Active Search", key="preset_active")
 
-    # Définition des valeurs par défaut et des presets
+    # Definition of default values and presets
     DEFAULTS = {
-        'consulting': 'Inclure tout', 'schedule': 'Tous les types', 'seniority_category': [],
-        'titles': [], 'category': 'Toutes les catégories', 'sector': 'Tous les secteurs',
+        'consulting': 'Include All', 'schedule': 'All types', 'seniority_category': [],
+        'titles': [], 'category': 'All categories', 'sector': 'All sectors',
         'category_company': [],
     }
+    # Corrected values to English, assuming data source is also in English per schema
     PRESET_THIBAULT = {
-        'consulting': 'Poste interne', 'schedule': 'À plein temps', 'seniority_category': ["Senior/Expert", "Non renseigné"],
-        'titles': ["Spécialiste BI/Décisionnel", "Analytics Engineer", "Business/Functional Analyst", "Data Analyst"],
-        'category_company': ['GE','PME'], 'sector': 'Tous les secteurs', 'company': 'Toutes les entreprises'
+        'consulting': 'Internal position', 'schedule': 'Full-time', 'seniority_category': ["Senior/Expert", "Not specified"],
+        'titles': ["BI/Decision Support Specialist", "Analytics Engineer", "Business/Functional Analyst", "Data Analyst"],
+        'category_company': ['Large Enterprise', 'Intermediate-sized Enterprise'], 'sector': 'All sectors', 'company': 'All companies'
     }
 
     current_values = PRESET_THIBAULT if st.session_state.preset_active else DEFAULTS
 
-    # --- AFFICHAGE DES FILTRES ---
-    st.sidebar.subheader("Filtres sur le poste")
+    # --- DISPLAY FILTERS ---
+    st.sidebar.subheader("Job Filters")
 
     # Correctly handle selectbox default
-    is_consulting_options = ['Inclure tout'] + sorted(source_df['consulting_status'].dropna().unique().tolist())
-    default_consulting = current_values['consulting'] if current_values['consulting'] in is_consulting_options else 'Inclure tout'
-    selected_is_consulting = st.sidebar.selectbox('Filtrer par mention de consulting :', options=is_consulting_options, index=is_consulting_options.index(default_consulting))
+    is_consulting_options = ['Include All'] + sorted(source_df['consulting_status'].dropna().unique().tolist())
+    default_consulting = current_values['consulting'] if current_values['consulting'] in is_consulting_options else 'Include All'
+    selected_is_consulting = st.sidebar.selectbox('Filter by consulting type:', options=is_consulting_options, index=is_consulting_options.index(default_consulting))
 
-    schedule_type_options = ['Tous les types'] + sorted(source_df['schedule_type'].dropna().unique().tolist())
+    schedule_type_options = ['All types'] + sorted(source_df['schedule_type'].dropna().unique().tolist())
     selected_schedule_type = st.sidebar.selectbox(
-        'Filtrer par type de contrat :', options=schedule_type_options,
-        index=schedule_type_options.index(current_values['schedule'])
+        'Filter by contract type:', options=schedule_type_options,
+        index=schedule_type_options.index(current_values['schedule']) if current_values['schedule'] in schedule_type_options else 0
     )
     
     # Correctly handle multiselect defaults
     seniority_options = sorted(source_df['seniority_category'].unique().tolist())
     safe_seniority_defaults = [s for s in current_values['seniority_category'] if s in seniority_options]
-    selected_seniority = st.sidebar.multiselect('Choisir des niveaux de séniorité :', options=seniority_options, default=safe_seniority_defaults)
+    selected_seniority = st.sidebar.multiselect('Select seniority levels:', options=seniority_options, default=safe_seniority_defaults)
 
     all_work_titles = sorted(source_df.explode('work_titles_final')['work_titles_final'].dropna().unique().tolist())
     safe_titles_defaults = [t for t in current_values['titles'] if t in all_work_titles]
-    selected_work_titles = st.sidebar.multiselect('Choisir des intitulés spécifiques :', options=all_work_titles, default=safe_titles_defaults)
+    selected_work_titles = st.sidebar.multiselect('Select specific job titles:', options=all_work_titles, default=safe_titles_defaults)
     
     
-    st.sidebar.subheader("Filtres sur la société")
-    category_options = ['Toutes les catégories'] + sorted(source_df['company_category'].dropna().unique().tolist())
+    st.sidebar.subheader("Company Filters")
+    category_options = ['All categories'] + sorted(source_df['company_category'].dropna().unique().tolist())
     selected_category_company = st.sidebar.multiselect(
-        "Filtrer par catégorie d'entreprise :", options=category_options,
+        "Filter by company category:", options=category_options,
         default=current_values['category_company']
     )
     selected_sector_company = st.sidebar.selectbox(
-        "Filtrer par secteur d'entreprise :",
-        options=['Tous les secteurs'] + sorted(source_df['activity_section_details'].dropna().unique().tolist())
+        "Filter by company sector:",
+        options=['All sectors'] + sorted(source_df['activity_section_details'].dropna().unique().tolist())
     )
     selected_company = st.sidebar.selectbox(
-        'Filtrer par entreprise :',
-        options=['Toutes les entreprises'] + sorted(source_df['company_name'].dropna().unique().tolist())
+        'Filter by company:',
+        options=['All companies'] + sorted(source_df['company_name'].dropna().unique().tolist())
     )
     
     # --- Filter Application ---
     df_display = source_df.copy()
-    if selected_is_consulting != 'Inclure tout':
+    if selected_is_consulting != 'Include All':
         df_display = df_display[df_display['consulting_status'] == selected_is_consulting]
-    if selected_sector_company != 'Tous les secteurs':
+    if selected_sector_company != 'All sectors':
         df_display = df_display[df_display['activity_section_details'] == selected_sector_company]
     if selected_category_company:
         df_display = df_display[df_display['company_category'].isin(selected_category_company)]
-    if selected_company != 'Toutes les entreprises':
+    if selected_company != 'All companies':
         df_display = df_display[df_display['company_name'] == selected_company]
-    if selected_schedule_type != 'Tous les types':
+    if selected_schedule_type != 'All types':
         df_display = df_display[df_display['schedule_type'] == selected_schedule_type]
     if selected_seniority:
         df_display = df_display[df_display['seniority_category'].isin(selected_seniority)]
@@ -217,65 +219,66 @@ if check_password():
         )]
 
     # --- Page Display ---
-    if st.session_state.page == 'Synthèse des compétences':
-        st.title("📊 Synthèse des compétences du marché")
-        st.write(f"Analyse de **{len(df_display)}** offres d'emploi filtrées.")
-        st.header("Compétences techniques les plus demandées")
-        plot_top_keywords_plotly(df_display, 'bi_tools', title="Top Outils BI / Solutions Techniques")
+    if st.session_state.page == 'Skills Summary':
+        st.title("📊 Market Skills Summary")
+        st.write(f"Analysis of **{len(df_display)}** filtered job offers.")
+        st.header("Most In-Demand Technical Skills")
+        plot_top_keywords_plotly(df_display, 'bi_tools', title="Top BI Tools / Technical Solutions")
         st.markdown("---") 
-        plot_top_keywords_plotly(df_display, 'languages', title="Top Langages Techniques")
+        plot_top_keywords_plotly(df_display, 'languages', title="Top Technical Languages")
         st.markdown("---") 
-        plot_top_keywords_plotly(df_display, 'cloud_platforms', title="Top Plateformes Cloud & Data")
+        plot_top_keywords_plotly(df_display, 'cloud_platforms', title="Top Cloud & Data Platforms")
         st.markdown("---") 
-    elif st.session_state.page == 'Décomposition des offres':
-        st.title("📄 Décomposition des offres")
-        st.write(f"Analyse de **{len(df_display)}** offres d'emploi filtrées.")
+    elif st.session_state.page == 'Job Offer Breakdown':
+        st.title("📄 Job Offer Breakdown")
+        st.write(f"Analysis of **{len(df_display)}** filtered job offers.")
         col1, col2 = st.columns(2)
         with col1:
-            st.header("Intitulés de poste")
-            plot_top_keywords_plotly(df_display, 'work_titles_final', top_n=15, title="Top des intitulés de poste")
+            st.header("Job Titles")
+            plot_top_keywords_plotly(df_display, 'work_titles_final', top_n=15, title="Top Job Titles")
         with col2:
-            st.header("Seniorités")
+            st.header("Seniority Levels")
             plot_seniorites_pie(df_display)
         st.markdown("---") 
         col1, col2 = st.columns(2)
         with col1:
-            st.header("Type de contrat")
-            plot_value_counts_plotly(df_display, 'schedule_type', top_n=15, title="Top des types de contrats")
+            st.header("Contract Type")
+            plot_value_counts_plotly(df_display, 'schedule_type', top_n=15, title="Top Contract Types")
         with col2:
             st.header("Consulting")
             plot_consulting_pie(df_display)
         st.markdown("---") 
         col1, col2 = st.columns(2)
         with col1:
-            st.header("Top categorie d'entreprise")
-            plot_value_counts_plotly(df_display, 'company_category', top_n=15, title="Top des catégorie")
+            st.header("Top Company Categories")
+            plot_value_counts_plotly(df_display, 'company_category', top_n=15, title="Top Categories")
         with col2:
-            st.header("Salaires")
+            st.header("Salaries")
             plot_salary_pie(df_display)
         st.markdown("---") 
         col1, col2 = st.columns(2)
         with col1:
-            st.header("Analyse des entreprises")
-            plot_value_counts_plotly(df_display, 'company_name', top_n=15, title="Top entreprises")
+            st.header("Company Analysis")
+            plot_value_counts_plotly(df_display, 'company_name', top_n=15, title="Top Companies")
         with col2:
-            st.header("Top activite")
-            plot_value_counts_plotly(df_display, 'activity_section_details', top_n=15, title="Top des activités")
+            st.header("Top Activities")
+            plot_value_counts_plotly(df_display, 'activity_section_details', top_n=15, title="Top Activities")
         st.markdown("---") 
 
-    elif st.session_state.page == 'Données brutes':
-        st.title(" Explorer les offres par pertinence")
+    elif st.session_state.page == 'Raw Data & Matching':
+        st.title(" Explorer Offers by Relevance")
         
-        # --- SECTION PROFIL & MATCH SCORE (DANS UN EXPANDER) ---
-        with st.expander("Configurer mon profil de recherche et le match score"):
-            st.toggle("Activer le profil de Thibault", key="profile_preset_active")
+        # --- PROFILE & MATCH SCORE SECTION (IN AN EXPANDER) ---
+        with st.expander("Configure my search profile and match score"):
+            st.toggle("Activate Thibault's Profile", key="profile_preset_active")
 
             PROFILE_DEFAULTS = {"my_skills": [], "target_roles": [], "all_job_info": [], "all_company_info": []}
+            # Corrected values to English
             PROFILE_THIBAULT = {
                 "my_skills": ["python", "sql", "tableau","excel","looker","metabase","vba","gcp","bigquery","airflow","dbt"],
                 "target_roles": ["Data Analyst", "Analytics Engineer"],
-                "all_job_info": ["Senior/Expert", "Non renseigné", "Poste interne", "À plein temps"],
-                "all_company_info": ['GE', 'PME']
+                "all_job_info": ["Senior/Expert", "Not specified", "Internal position", "Full-time"],
+                "all_company_info": ['Large Enterprise', 'Intermediate-sized Enterprise']
             }
             current_profile_values = PROFILE_THIBAULT if st.session_state.profile_preset_active else PROFILE_DEFAULTS
 
@@ -289,8 +292,9 @@ if check_password():
             # Get unique skills and then sort
             all_skills = sorted(list(set(combined_skills)))
 
-            if "Non renseigné" in all_skills: 
-                all_skills.remove("Non renseigné")
+            # Corrected value for removal
+            if "Not specified" in all_skills: 
+                all_skills.remove("Not specified")
 
             # Prepare options lists
             all_work_titles = sorted(source_df.explode('work_titles_final')['work_titles_final'].dropna().unique().tolist())
@@ -304,16 +308,16 @@ if check_password():
             safe_company_info = [i for i in current_profile_values.get('all_company_info', []) if i in all_company_info_options]
 
             # Use the safe defaults in the widgets
-            st.session_state.profile['my_skills'] = st.multiselect('Mes Compétences (+3 pts/compétence):', options=all_skills, default=safe_skills)
-            st.session_state.profile['target_roles'] = st.multiselect('Mes Rôles Cibles (+10 pts):', options=all_work_titles, default=safe_roles)
-            st.session_state.profile['all_job_info'] = st.multiselect('Infos sur le poste (+5 pts):', options=all_job_info_options, default=safe_job_info)
-            st.session_state.profile['all_company_info'] = st.multiselect("Infos sur l'entreprise (+5 pts):", options=all_company_info_options, default=safe_company_info)
+            st.session_state.profile['my_skills'] = st.multiselect('My Skills (+3 pts/skill):', options=all_skills, default=safe_skills)
+            st.session_state.profile['target_roles'] = st.multiselect('My Target Roles (+10 pts):', options=all_work_titles, default=safe_roles)
+            st.session_state.profile['all_job_info'] = st.multiselect('Job Info (+5 pts):', options=all_job_info_options, default=safe_job_info)
+            st.session_state.profile['all_company_info'] = st.multiselect("Company Info (+5 pts):", options=all_company_info_options, default=safe_company_info)
         
         # Recalculate scores and display data
         df_display['match_score'] = df_display.apply(lambda row: calculate_match_score(row, st.session_state.profile), axis=1)
-        st.write(f"Affichage de **{len(df_display)}** offres filtrées.")
+        st.write(f"Displaying **{len(df_display)}** filtered offers.")
 
-        # --- Logique de l'éditeur de données ---
+        # --- Data editor logic ---
         conn = st.connection("supabase", type=SupabaseConnection)
         response = conn.client.table("tracker").select("*").execute()
         tracker_df = pd.DataFrame(response.data)
@@ -334,8 +338,8 @@ if check_password():
         other_columns = [col for col in df_prepared.columns if col not in desired_order]
         df_prepared = df_prepared[desired_order + other_columns]
 
-        # --- LOGIQUE DE SESSION STATE MISE À JOUR ---
-        # On compare le profil actuel avec une copie pour détecter les changements
+        # --- SESSION STATE UPDATE LOGIC ---
+        # Compare the current profile with a copy to detect changes
         profile_has_changed = st.session_state.get('profile') != st.session_state.get('last_profile')
 
         try:
@@ -345,10 +349,10 @@ if check_password():
         newly_filtered_ids = set(df_prepared['job_id'])
         filters_have_changed = current_ids_in_state != newly_filtered_ids
 
-        # On réinitialise l'état si les filtres OU le profil ont changé
+        # Reset the state if filters OR profile have changed
         if 'df_editor_state' not in st.session_state or filters_have_changed or profile_has_changed:
             st.session_state.df_editor_state = df_prepared.copy()
-            # On met à jour la "dernière version connue" du profil
+            # Update the "last known version" of the profile
             st.session_state.last_profile = st.session_state.profile.copy()
 
 
@@ -359,7 +363,7 @@ if check_password():
             st.session_state.df_editor_state,
             column_config={
                 "match_score": st.column_config.ProgressColumn(
-                    "Score", help="Score de pertinence basé sur votre profil",
+                    "Score", help="Relevance score based on your profile",
                     min_value=0, max_value=max_possible_score, width="small"
                 ),
                 "title": st.column_config.Column(pinned=True, width="medium"),
@@ -369,7 +373,7 @@ if check_password():
                     required=False, pinned=True,
                 ),
                 "contact_date": st.column_config.DateColumn("Contact Date", width="small"),
-                "apply_link_1": st.column_config.LinkColumn("Lien pour postuler 1"),
+                "apply_link_1": st.column_config.LinkColumn("Apply Link 1"),
                 "job_id": None
             },
             hide_index=True, use_container_width=True, key="job_editor"
@@ -395,4 +399,4 @@ if check_password():
             updated_tracker = updated_tracker.astype(object).where(pd.notnull(updated_tracker), None)
             conn.client.table("tracker").upsert(updated_tracker.to_dict(orient="records")).execute()
             st.success("Your application progress has been saved to Supabase! 🚀")
-            st.balloons() # <-- Ajout des ballons ici
+            st.balloons() # <-- Adding balloons here

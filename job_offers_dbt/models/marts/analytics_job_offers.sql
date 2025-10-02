@@ -18,6 +18,8 @@ final as (
         via,
         salary is not null as is_salary_mentioned, -- Business logic moved to dbt
         salary,
+        annual_min_salary,
+        annual_max_salary,
         work_titles_final,
         schedule_type,
         posted_at,
