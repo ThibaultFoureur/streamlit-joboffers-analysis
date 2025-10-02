@@ -1,19 +1,33 @@
-from st_supabase_connection import SupabaseConnection
-from datetime import date
-import json
-import os
-
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from st_supabase_connection import SupabaseConnection
+from datetime import date
+from urllib.parse import urlencode
+import json
+import os
+# NEW: Imports needed for the PKCE flow
+import hashlib
+import base64
 
 st.set_page_config(layout="wide")
 
-# --- Password Protection ---
-def check_password():
+# --- Refactored Password Check Function ---
+def check_password(conn: SupabaseConnection):
     if st.session_state.get("password_correct", False):
         return True
-    st.header("🔑 Protected Access")
+    if conn.auth.get_session():
+        st.session_state["password_correct"] = True
+        return True
+    st.title("🔑 Protected Access")
+    st.markdown(
+        """
+        This is a private application. Please enter the password to continue.
+        
+        - To request access, please contact me at [t.foureur@gmail.com](mailto:t.foureur@gmail.com).
+        - For more information about the project, visit the [GitHub repository](https://github.com/ThibaultFoureur/streamlit-joboffers-analysis).
+        """
+    )
     password = st.text_input("Please enter the password...", type="password")
     if password == st.secrets.get("PASSWORD", "default_password"):
         st.session_state["password_correct"] = True
@@ -22,15 +36,70 @@ def check_password():
         st.error("Incorrect password.")
     return False
 
-# --- Main Application Logic ---
-if check_password():
+# --- Main Application Logic (Final Version with Manual URL) ---
+def main():
+    conn = st.connection("supabase", type=SupabaseConnection)
+    query_params = st.query_params
+
+    # --- PKCE: Step 3 - Exchange the code for a session ---
+    if "code" in query_params and "pkce_verifier" in query_params:
+        auth_code = query_params["code"]
+        pkce_verifier = query_params["pkce_verifier"]
+        
+        try:
+            session = conn.auth.exchange_code_for_session({
+                "auth_code": auth_code,
+                "code_verifier": pkce_verifier,
+            })
+            st.markdown(f'<meta http-equiv="refresh" content="0; url=http://lvh.me:8501">', unsafe_allow_html=True)
+            st.stop()
+        except Exception as e:
+            st.error(f"Error during code exchange: {e}")
+            st.stop()
+
+
+    if not check_password(conn):
+        st.stop()
+
+    # --- Sidebar for Optional User Login ---
+    st.sidebar.header("User Account")
+    session = conn.auth.get_session()
+
+    if not session:
+        if st.sidebar.button("Login with Google", type="primary"):
+            
+            pkce_verifier = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b'=').decode('utf-8')
+            pkce_challenge = base64.urlsafe_b64encode(hashlib.sha256(pkce_verifier.encode('utf-8')).digest()).rstrip(b'=').decode('utf-8')
+            
+            redirect_url_with_verifier = f"http://lvh.me:8501?pkce_verifier={pkce_verifier}"
+
+            # Manually construct the authorization URL, bypassing the problematic function.
+            supabase_url = conn.client.supabase_url
+            
+            params = {
+                "provider": "google",
+                "redirect_to": redirect_url_with_verifier,
+                "code_challenge": pkce_challenge,
+                "code_challenge_method": "S256"
+            }
+            auth_url = f"{supabase_url}/auth/v1/authorize?{urlencode(params)}"
+            
+            st.markdown(f'<meta http-equiv="refresh" content="0; url={auth_url}">', unsafe_allow_html=True)
+            st.stop()
+    else:
+        user_email = session.user.email
+        st.sidebar.write("Logged in as:")
+        st.sidebar.markdown(f"**{user_email}**")
+        st.success("You have successfully logged in! (For now app is still the same)")
+        if st.sidebar.button("Logout"):
+            conn.auth.sign_out()
+            st.rerun()
 
     # --- Data Loading (Simplified) ---
     @st.cache_data
     def load_data_from_supabase():
-        """Loads the final, clean data from the analytics_job_offers dbt model in Supabase."""
+        """Loads the final, clean data."""
         print("Loading data from Supabase...")
-        conn = st.connection("supabase", type=SupabaseConnection)
         response = conn.client.table("analytics_job_offers").select("*").execute()
         df = pd.DataFrame(response.data)
         # Ensure array columns are treated as lists, handling potential None values
@@ -414,11 +483,35 @@ if check_password():
             st.rerun()
 
         if st.button("Save My Progress to Supabase"):
-            updated_tracker = st.session_state.df_editor_state[["job_id", "status", "contact_date", "notes"]].copy()
-            updated_tracker.dropna(subset=['status'], inplace=True)
-            if 'contact_date' in updated_tracker.columns:
-                updated_tracker['contact_date'] = pd.to_datetime(updated_tracker['contact_date']).dt.strftime('%Y-%m-%d')
-            updated_tracker = updated_tracker.astype(object).where(pd.notnull(updated_tracker), None)
-            conn.client.table("tracker").upsert(updated_tracker.to_dict(orient="records")).execute()
-            st.success("Your application progress has been saved to Supabase! 🚀")
-            st.balloons()
+            # Récupérer l'ID de l'utilisateur de la session actuelle
+            # Cela fonctionne que l'utilisateur soit connecté avec Google ou anonyme
+            current_user_id = conn.auth.get_session().user.id if conn.auth.get_session() else None
+
+            if current_user_id:
+                # Préparer les données pour la sauvegarde
+                updated_tracker = st.session_state.df_editor_state[["job_id", "status", "contact_date", "notes"]].copy()
+                updated_tracker.dropna(subset=['status'], inplace=True)
+                
+                # Ajouter l'ID de l'utilisateur à chaque ligne
+                updated_tracker['user_id'] = current_user_id
+
+                if 'contact_date' in updated_tracker.columns:
+                    updated_tracker['contact_date'] = pd.to_datetime(updated_tracker['contact_date']).dt.strftime('%Y-%m-%d')
+                
+                updated_tracker = updated_tracker.astype(object).where(pd.notnull(updated_tracker), None)
+                
+                # 'upsert' mettra à jour les entrées existantes ou en créera de nouvelles
+                # Il doit savoir sur quelle(s) colonne(s) se baser pour détecter un conflit (une ligne existante)
+                conn.client.table("tracker").upsert(
+                    updated_tracker.to_dict(orient="records"),
+                    on_conflict="job_id,user_id" # Conflit si une ligne existe déjà pour ce job ET cet utilisateur
+                ).execute()
+                
+                st.success("Your application progress has been saved to Supabase! 🚀")
+                st.balloons()
+            else:
+                st.error("Could not identify user. Please try logging in again.")
+
+# --- Run the main function ---
+if __name__ == "__main__":
+    main()
