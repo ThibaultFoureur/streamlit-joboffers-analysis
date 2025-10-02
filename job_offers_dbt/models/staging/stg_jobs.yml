@@ -1,0 +1,60 @@
+version: 2
+
+models:
+  - name: stg_jobs
+    description: "Cleans, casts, and enriches raw job offer data. This model is the first layer of transformation, turning raw JSON and text fields into structured columns like categories, skills, and application links. It serves as the foundational layer for all downstream analysis."
+    
+    columns:
+      - name: job_id
+        description: "The unique identifier for a job offer, provided by the source API. This is the primary key for job offers."
+        tests:
+          - unique
+          - not_null
+
+      - name: title
+        description: "The original, raw title of the job offer."
+        tests:
+          - not_null
+
+      - name: company_name
+        description: "The name of the company posting the job offer."
+        tests:
+          - not_null
+
+      - name: work_titles_final
+        description: "An array of standardized job categories (e.g., Data Analyst, BI Specialist) derived from the job title. An offer can belong to multiple categories."
+        tests:
+          - not_null # Ensures the array itself is never null.
+
+      - name: seniority_category
+        description: "The single, standardized seniority level (e.g., Senior/Expert, Junior) derived from the job title."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Intern/Apprentice', 'Senior/Expert', 'Lead/Manager', 'Junior', 'Not specified']
+      
+      - name: schedule_type
+        description: "The type of employment schedule (e.g., 'À plein temps', 'Temps partiel'). Extracted from JSON."
+        # You could add an accepted_values test here too as you discover all possible values.
+
+      - name: posted_at
+        description: "The string indicating when the job was posted (e.g., 'il y a 11 heures')."
+
+      - name: languages
+        description: "An array of programming languages keywords found in the job's full text."
+
+      - name: bi_tools
+        description: "An array of Business Intelligence tool keywords found in the job's full text."
+
+      - name: cloud_platforms
+        description: "An array of cloud platform keywords found in the job's full text."
+      
+      - name: apply_link_1
+        description: "The primary application link for the job offer."
+        # A simple not_null test could be too strict, as some jobs might not have a link.
+        # A custom test to check for valid URL format could be added later.
+
+      - name: created_at
+        description: "The timestamp when the raw job offer was first loaded into the database."
+        tests:
+          - not_null
