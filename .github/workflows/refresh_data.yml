@@ -1,0 +1,55 @@
+name: Daily Job Offer and Companies Data Refresh
+
+on:
+  # Allows you to run this workflow manually from the GitHub Actions tab
+  workflow_dispatch:
+
+  # Schedules the workflow to run every day at 2 AM (UTC)
+  schedule:
+    - cron: '0 2 * * *'
+
+jobs:
+  build-and-refresh:
+    runs-on: ubuntu-latest # Uses a standard Linux virtual machine
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3 # Step 1: Checks-out your repository's code
+
+      - name: Set up Python
+        uses: actions/setup-python@v4 # Step 2: Sets up the Python environment
+        with:
+          python-version: '3.12' # Make sure this version matches yours
+
+      - name: Install Python dependencies
+        run: | # Step 3: Installs all necessary Python libraries
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Extraction Script
+        env: # Step 4: Runs the extraction script, passing secrets as environment variables
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+        run: python scripts/extraction.py
+
+      - name: Setup dbt profile
+        run: | # Step 5: Creates the profiles.yml file so dbt can connect to the database
+          mkdir -p ~/.dbt/
+          echo "job_offers_dbt:
+            target: prod
+            outputs:
+              prod:
+                type: postgres
+                host: ${{ secrets.DBT_HOST }}
+                user: ${{ secrets.DBT_USER }}
+                password: ${{ secrets.DBT_PASSWORD }}
+                port: 6543
+                dbname: postgres
+                schema: public
+                threads: 1
+          " > ~/.dbt/profiles.yml
+
+      - name: Run dbt models
+        run: | # Step 6: Runs the dbt transformations
+          dbt run --profiles-dir ~/.dbt --project-dir ./job_offers_dbt
