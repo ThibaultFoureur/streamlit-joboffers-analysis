@@ -9,28 +9,78 @@ import plotly.express as px
 
 st.set_page_config(layout="wide")
 
-# --- Password Protection ---
+# --- LAYER 1: Shared Password Protection (Corrected) ---
 def check_password():
+    """
+    Returns `True` if the user is authenticated.
+
+    Authentication is granted if:
+    1. The user has already entered the correct password in the current session.
+    2. The user has an active Supabase (Google) session.
+    """
+    # Check if the password is correct in the session state
     if st.session_state.get("password_correct", False):
         return True
-    st.header("🔑 Protected Access")
-    password = st.text_input("Please enter the password...", type="password")
+
+    # NEW: Check for an active Supabase session.
+    # This will be True on the redirect back from Google.
+    conn = st.connection("supabase", type=SupabaseConnection)
+    if conn.auth.get_session():
+        st.session_state["password_correct"] = True  # Set the flag for this session
+        return True
+
+    # --- If no session exists, show the password entry page ---
+    st.title("🔑 Protected Access")
+    st.markdown(
+        """
+        This is a private application. Please enter the password to continue.
+        
+        - To request access, please contact me at [t.foureur@gmail.com](mailto:t.foureur@gmail.com).
+        - For more information about the project, visit the [GitHub repository](https://github.com/ThibaultFoureur/streamlit-joboffers-analysis).
+        """
+    )
+    
+    password = st.text_input(
+        "Please enter the password...", type="password", key="password_input"
+    )
+
     if password == st.secrets.get("PASSWORD", "default_password"):
         st.session_state["password_correct"] = True
         st.rerun()
     elif password:
         st.error("Incorrect password.")
+        
     return False
 
 # --- Main Application Logic ---
+# The app will only run if the shared password is correct.
 if check_password():
+
+    # Initialize Supabase connection
+    conn = st.connection("supabase", type=SupabaseConnection)
+
+    # --- Sidebar for Optional User Login ---
+    st.sidebar.header("User Account")
+    session = conn.auth.get_session()
+
+    if not session:
+        if st.sidebar.button("Login with Google", type="primary"):
+            auth_url = conn.auth.sign_in_with_oauth({"provider": "google"})
+            st.markdown(f'<meta http-equiv="refresh" content="0; url={auth_url.url}">', unsafe_allow_html=True)
+            st.stop()
+    else:
+        user_email = session.user.email
+        st.sidebar.write(f"Logged in as:")
+        st.sidebar.markdown(f"**{user_email}**")
+        if st.sidebar.button("Logout"):
+            conn.auth.sign_out()
+            st.rerun()
 
     # --- Data Loading (Simplified) ---
     @st.cache_data
     def load_data_from_supabase():
         """Loads the final, clean data from the analytics_job_offers dbt model in Supabase."""
         print("Loading data from Supabase...")
-        conn = st.connection("supabase", type=SupabaseConnection)
         response = conn.client.table("analytics_job_offers").select("*").execute()
         df = pd.DataFrame(response.data)
         # Ensure array columns are treated as lists, handling potential None values
@@ -414,11 +464,31 @@ if check_password():
             st.rerun()
 
         if st.button("Save My Progress to Supabase"):
-            updated_tracker = st.session_state.df_editor_state[["job_id", "status", "contact_date", "notes"]].copy()
-            updated_tracker.dropna(subset=['status'], inplace=True)
-            if 'contact_date' in updated_tracker.columns:
-                updated_tracker['contact_date'] = pd.to_datetime(updated_tracker['contact_date']).dt.strftime('%Y-%m-%d')
-            updated_tracker = updated_tracker.astype(object).where(pd.notnull(updated_tracker), None)
-            conn.client.table("tracker").upsert(updated_tracker.to_dict(orient="records")).execute()
-            st.success("Your application progress has been saved to Supabase! 🚀")
-            st.balloons()
+            # Récupérer l'ID de l'utilisateur de la session actuelle
+            # Cela fonctionne que l'utilisateur soit connecté avec Google ou anonyme
+            current_user_id = conn.auth.get_session().user.id if conn.auth.get_session() else None
+
+            if current_user_id:
+                # Préparer les données pour la sauvegarde
+                updated_tracker = st.session_state.df_editor_state[["job_id", "status", "contact_date", "notes"]].copy()
+                updated_tracker.dropna(subset=['status'], inplace=True)
+                
+                # Ajouter l'ID de l'utilisateur à chaque ligne
+                updated_tracker['user_id'] = current_user_id
+
+                if 'contact_date' in updated_tracker.columns:
+                    updated_tracker['contact_date'] = pd.to_datetime(updated_tracker['contact_date']).dt.strftime('%Y-%m-%d')
+                
+                updated_tracker = updated_tracker.astype(object).where(pd.notnull(updated_tracker), None)
+                
+                # 'upsert' mettra à jour les entrées existantes ou en créera de nouvelles
+                # Il doit savoir sur quelle(s) colonne(s) se baser pour détecter un conflit (une ligne existante)
+                conn.client.table("tracker").upsert(
+                    updated_tracker.to_dict(orient="records"),
+                    on_conflict="job_id,user_id" # Conflit si une ligne existe déjà pour ce job ET cet utilisateur
+                ).execute()
+                
+                st.success("Your application progress has been saved to Supabase! 🚀")
+                st.balloons()
+            else:
+                st.error("Could not identify user. Please try logging in again.")
