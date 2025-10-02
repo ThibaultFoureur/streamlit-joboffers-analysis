@@ -180,7 +180,7 @@ def main():
         keywords = keywords[keywords[column_name] != "Not specified"]
         keyword_counts = keywords[column_name].value_counts().nlargest(top_n).sort_values()
         if not keyword_counts.empty:
-            fig = px.bar(keyword_counts, x=keyword_counts.values, y=keyword_counts.index, orientation='h', title=title)
+            fig = px.bar(keyword_counts, x=keyword_counts.values, y=keyword_counts.index, orientation='h', title=title,  labels={'x': "Number of offers", 'y': column_name}, text_auto=True)
             st.plotly_chart(fig, use_container_width=True)
 
     def plot_value_counts_plotly(df_to_plot, column_name, top_n=10, title=""):
