@@ -42,28 +42,41 @@ if check_password():
     # --- Match Score Calculation ---
     def calculate_match_score(row, profile):
         score = 0
+        # Score for target roles
         if any(title in row['work_titles_final'] for title in profile.get('target_roles', [])):
             score += 10
         
+        # Score for skills
         all_job_skills = set(row.get('languages', []) + row.get('bi_tools', []) + row.get('cloud_platforms', []) + row.get('data_modelization', []))
         for skill in profile.get('my_skills', []):
             if skill in all_job_skills:
                 score += 3
 
+        # Score for job info (seniority, contract, etc.)
         job_info = {row.get('seniority_category'), row.get('consulting_status'), row.get('schedule_type')}
         if profile.get('all_job_info') and not job_info.isdisjoint(profile.get('all_job_info', [])):
                 score += 5
 
+        # Score for company info
         company_info = {row.get('company_category'), row.get('activity_section_details')}
         if profile.get('all_company_info') and not company_info.isdisjoint(profile.get('all_company_info', [])):
             score += 5
             
+        # NEW: Score for salary
+        min_salary_pref = profile.get('min_salary')
+        if min_salary_pref and min_salary_pref > 0:
+            # +10 points if the minimum salary meets the preference
+            if pd.notna(row['annual_min_salary']) and row['annual_min_salary'] >= min_salary_pref:
+                score += 10
+            # +5 points if the max salary meets the preference (and min did not)
+            elif pd.notna(row['annual_max_salary']) and row['annual_max_salary'] >= min_salary_pref:
+                score += 5
+                
         return score
 
     # --- Plotting Functions ---
     def plot_seniorites_pie(df_to_plot):
         seniority_counts = df_to_plot['seniority_category'].value_counts()
-        # Corrected values to match the English schema
         color_map = {'Senior/Expert': '#F6FF47', 'Lead/Manager': '#FF6347', 'Not specified': '#3FD655', 'Intern/Apprentice': "#7A8C8D", 'Junior': "#3FCCD6", 'Other': 'blue'}
         fig = px.pie(values=seniority_counts.values, names=seniority_counts.index, title="Seniority Level Distribution", color=seniority_counts.index, color_discrete_map=color_map)
         st.plotly_chart(fig, use_container_width=True)
@@ -91,12 +104,10 @@ if check_password():
         st.plotly_chart(fig, use_container_width=True)
     
     def plot_top_keywords_plotly(df_to_plot, column_name, top_n=10, title=""):
-        # This function is now simpler because dbt provides clean arrays
         if column_name not in df_to_plot.columns or df_to_plot[column_name].dropna().empty:
             st.warning(f"No data to display for '{title}'.")
             return
         keywords = df_to_plot.explode(column_name)
-        # Filter out any placeholder values if they exist
         keywords = keywords[keywords[column_name] != "Not specified"]
         keyword_counts = keywords[column_name].value_counts().nlargest(top_n).sort_values()
         if not keyword_counts.empty:
@@ -151,7 +162,6 @@ if check_password():
         'titles': [], 'category': 'All categories', 'sector': 'All sectors',
         'category_company': [],
     }
-    # Corrected values to English, assuming data source is also in English per schema
     PRESET_THIBAULT = {
         'consulting': 'Internal position', 'schedule': 'Full-time', 'seniority_category': ["Senior/Expert", "Not specified"],
         'titles': ["BI/Decision Support Specialist", "Analytics Engineer", "Business/Functional Analyst", "Data Analyst"],
@@ -163,7 +173,6 @@ if check_password():
     # --- DISPLAY FILTERS ---
     st.sidebar.subheader("Job Filters")
 
-    # Correctly handle selectbox default
     is_consulting_options = ['Include All'] + sorted(source_df['consulting_status'].dropna().unique().tolist())
     default_consulting = current_values['consulting'] if current_values['consulting'] in is_consulting_options else 'Include All'
     selected_is_consulting = st.sidebar.selectbox('Filter by consulting type:', options=is_consulting_options, index=is_consulting_options.index(default_consulting))
@@ -174,7 +183,6 @@ if check_password():
         index=schedule_type_options.index(current_values['schedule']) if current_values['schedule'] in schedule_type_options else 0
     )
     
-    # Correctly handle multiselect defaults
     seniority_options = sorted(source_df['seniority_category'].unique().tolist())
     safe_seniority_defaults = [s for s in current_values['seniority_category'] if s in seniority_options]
     selected_seniority = st.sidebar.multiselect('Select seniority levels:', options=seniority_options, default=safe_seniority_defaults)
@@ -182,7 +190,6 @@ if check_password():
     all_work_titles = sorted(source_df.explode('work_titles_final')['work_titles_final'].dropna().unique().tolist())
     safe_titles_defaults = [t for t in current_values['titles'] if t in all_work_titles]
     selected_work_titles = st.sidebar.multiselect('Select specific job titles:', options=all_work_titles, default=safe_titles_defaults)
-    
     
     st.sidebar.subheader("Company Filters")
     category_options = ['All categories'] + sorted(source_df['company_category'].dropna().unique().tolist())
@@ -272,13 +279,16 @@ if check_password():
         with st.expander("Configure my search profile and match score"):
             st.toggle("Activate Thibault's Profile", key="profile_preset_active")
 
-            PROFILE_DEFAULTS = {"my_skills": [], "target_roles": [], "all_job_info": [], "all_company_info": []}
-            # Corrected values to English
+            PROFILE_DEFAULTS = {
+                "my_skills": [], "target_roles": [], "all_job_info": [],
+                "all_company_info": [], "min_salary": None
+            }
             PROFILE_THIBAULT = {
-                "my_skills": ["python", "sql", "tableau","excel","looker","metabase","vba","gcp","bigquery","airflow","dbt"],
+                "my_skills": ["python", "sql", "tableau","excel","looker","gcp","dbt"],
                 "target_roles": ["Data Analyst", "Analytics Engineer"],
                 "all_job_info": ["Senior/Expert", "Not specified", "Internal position", "Full-time"],
-                "all_company_info": ['Large Enterprise', 'Intermediate-sized Enterprise']
+                "all_company_info": ['Large Enterprise', 'Intermediate-sized Enterprise'],
+                "min_salary": 55000
             }
             current_profile_values = PROFILE_THIBAULT if st.session_state.profile_preset_active else PROFILE_DEFAULTS
 
@@ -289,10 +299,8 @@ if check_password():
                 source_df.explode('cloud_platforms')['cloud_platforms'].dropna().tolist() +
                 source_df.explode('data_modelization')['data_modelization'].dropna().tolist()
             )
-            # Get unique skills and then sort
             all_skills = sorted(list(set(combined_skills)))
 
-            # Corrected value for removal
             if "Not specified" in all_skills: 
                 all_skills.remove("Not specified")
 
@@ -306,12 +314,23 @@ if check_password():
             safe_roles = [r for r in current_profile_values.get('target_roles', []) if r in all_work_titles]
             safe_job_info = [i for i in current_profile_values.get('all_job_info', []) if i in all_job_info_options]
             safe_company_info = [i for i in current_profile_values.get('all_company_info', []) if i in all_company_info_options]
+            default_salary = current_profile_values.get("min_salary")
 
             # Use the safe defaults in the widgets
             st.session_state.profile['my_skills'] = st.multiselect('My Skills (+3 pts/skill):', options=all_skills, default=safe_skills)
             st.session_state.profile['target_roles'] = st.multiselect('My Target Roles (+10 pts):', options=all_work_titles, default=safe_roles)
             st.session_state.profile['all_job_info'] = st.multiselect('Job Info (+5 pts):', options=all_job_info_options, default=safe_job_info)
             st.session_state.profile['all_company_info'] = st.multiselect("Company Info (+5 pts):", options=all_company_info_options, default=safe_company_info)
+            
+            # NEW: Number input for minimum salary
+            st.session_state.profile['min_salary'] = st.number_input(
+                'Minimum annual salary in € (+5/10 pts):',
+                value=default_salary or 0,
+                placeholder="Input a minimum salary...",
+                min_value=0,
+                step=1000,
+                format="%d"
+            )
         
         # Recalculate scores and display data
         df_display['match_score'] = df_display.apply(lambda row: calculate_match_score(row, st.session_state.profile), axis=1)
@@ -334,12 +353,11 @@ if check_password():
         if 'contact_date' not in df_prepared.columns: df_prepared['contact_date'] = None
         if 'notes' not in df_prepared.columns: df_prepared['notes'] = None
         
-        desired_order = ['match_score', 'title', 'company_name', 'status', 'contact_date']
+        desired_order = ['match_score', 'title', 'company_name', 'status', 'contact_date', 'annual_min_salary', 'annual_max_salary']
         other_columns = [col for col in df_prepared.columns if col not in desired_order]
         df_prepared = df_prepared[desired_order + other_columns]
 
         # --- SESSION STATE UPDATE LOGIC ---
-        # Compare the current profile with a copy to detect changes
         profile_has_changed = st.session_state.get('profile') != st.session_state.get('last_profile')
 
         try:
@@ -349,14 +367,16 @@ if check_password():
         newly_filtered_ids = set(df_prepared['job_id'])
         filters_have_changed = current_ids_in_state != newly_filtered_ids
 
-        # Reset the state if filters OR profile have changed
         if 'df_editor_state' not in st.session_state or filters_have_changed or profile_has_changed:
             st.session_state.df_editor_state = df_prepared.copy()
-            # Update the "last known version" of the profile
             st.session_state.last_profile = st.session_state.profile.copy()
 
-
-        max_possible_score = 10 + 5 + 5 + (3 * len(st.session_state.profile['my_skills']))
+        # Dynamically calculate the maximum possible score based on the current profile
+        max_possible_score = 10 + 5 + 5 # Base score for role, job info, company info
+        max_possible_score += (3 * len(st.session_state.profile.get('my_skills', [])))
+        if st.session_state.profile.get('min_salary', 0) > 0:
+            max_possible_score += 10 # Max points from salary
+            
         if max_possible_score == 0: max_possible_score = 1
 
         edited_df = st.data_editor(
@@ -373,6 +393,8 @@ if check_password():
                     required=False, pinned=True,
                 ),
                 "contact_date": st.column_config.DateColumn("Contact Date", width="small"),
+                "annual_min_salary": st.column_config.NumberColumn("Min Salary (€)", format="€%d"),
+                "annual_max_salary": st.column_config.NumberColumn("Max Salary (€)", format="€%d"),
                 "apply_link_1": st.column_config.LinkColumn("Apply Link 1"),
                 "job_id": None
             },
@@ -399,4 +421,4 @@ if check_password():
             updated_tracker = updated_tracker.astype(object).where(pd.notnull(updated_tracker), None)
             conn.client.table("tracker").upsert(updated_tracker.to_dict(orient="records")).execute()
             st.success("Your application progress has been saved to Supabase! 🚀")
-            st.balloons() # <-- Adding balloons here
+            st.balloons()

@@ -56,12 +56,13 @@ salary_calculations AS (
         -- 3. Extract numeric values using REGEX, keeping only digits and the decimal point
         -- Use NULLIF to handle cases where no numbers are found, preventing errors
         NULLIF(REGEXP_REPLACE(
-            CASE
-                -- If there's a range (using 'à'), take the first part
-                WHEN salary LIKE '%à%' THEN SPLIT_PART(LOWER(salary), 'à', 1)
-                -- Otherwise, take the whole string
-                ELSE salary
-            END,
+            REPLACE(
+                CASE
+                        -- If there's a range (using 'à'), take the first part
+                        WHEN salary LIKE '%à%' THEN SPLIT_PART(LOWER(salary), 'à', 1)
+                        ELSE salary
+                    END,
+                ',', '.'),
         '[^0-9.]', '', 'g'), '')::NUMERIC AS min_value,
 
         NULLIF(REGEXP_REPLACE(
