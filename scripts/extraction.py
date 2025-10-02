@@ -8,7 +8,7 @@ import requests
 import re
 
 # --- CONSTANTS ---
-MAX_PAGES_PER_QUERY = 2
+MAX_PAGES_PER_QUERY = 8
 
 # --- SERVICE CONNECTIONS ---
 load_dotenv()
@@ -117,7 +117,17 @@ if __name__ == "__main__":
         print(f"⚠️ Could not fetch existing job IDs, will proceed without it. Error: {e}")
         existing_job_ids = set()
 
-    search_queries = ['"Analytics Engineer" paris']
+    search_queries = [
+    '"Analytics Engineer" paris',
+    '"BI Analyst" paris',
+    '"Data Analyst Power BI" paris',
+    '"Ingénieur BI" paris',
+    '"Data Analyst" paris',
+    '"Analyste décisionnel" paris',
+    '"Business Analyst" paris',
+    '"Développeur BI" paris',
+    '"Analyste de données" paris',
+    ]
     all_new_jobs_to_load = []
 
     for query in search_queries:
@@ -136,10 +146,12 @@ if __name__ == "__main__":
         print("✅ No new job offers to add. Skipping to Part 2.")
     else:
         raw_jobs_df = pd.DataFrame(all_new_jobs_to_load)
-        print(f"\nLoading {len(raw_jobs_df)} new job offers into 'raw_jobs' table...")
+        raw_jobs_df.drop_duplicates(subset=['job_id'], keep='first', inplace=True)
+        
+        print(f"\nUpserting {len(raw_jobs_df)} new and unique job offers into 'raw_jobs' table...")
         raw_jobs_df = raw_jobs_df.astype(object).where(pd.notnull(raw_jobs_df), None)
         try:
-            supabase.table('raw_jobs').insert(raw_jobs_df.to_dict(orient='records')).execute()
+            supabase.table('raw_jobs').upsert(raw_jobs_df.to_dict(orient='records')).execute()
             print("✅ Part 1 Load successful!")
         except Exception as e:
             print(f"❌ Error during 'raw_jobs' load: {e}")
