@@ -1,35 +1,24 @@
-from st_supabase_connection import SupabaseConnection
-from datetime import date
-import json
-import os
-
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from st_supabase_connection import SupabaseConnection
+from datetime import date
+from urllib.parse import urlencode
+import json
+import os
+# NEW: Imports needed for the PKCE flow
+import hashlib
+import base64
 
 st.set_page_config(layout="wide")
 
-# --- LAYER 1: Shared Password Protection (Corrected) ---
-def check_password():
-    """
-    Returns `True` if the user is authenticated.
-
-    Authentication is granted if:
-    1. The user has already entered the correct password in the current session.
-    2. The user has an active Supabase (Google) session.
-    """
-    # Check if the password is correct in the session state
+# --- Refactored Password Check Function ---
+def check_password(conn: SupabaseConnection):
     if st.session_state.get("password_correct", False):
         return True
-
-    # NEW: Check for an active Supabase session.
-    # This will be True on the redirect back from Google.
-    conn = st.connection("supabase", type=SupabaseConnection)
     if conn.auth.get_session():
-        st.session_state["password_correct"] = True  # Set the flag for this session
+        st.session_state["password_correct"] = True
         return True
-
-    # --- If no session exists, show the password entry page ---
     st.title("🔑 Protected Access")
     st.markdown(
         """
@@ -39,25 +28,38 @@ def check_password():
         - For more information about the project, visit the [GitHub repository](https://github.com/ThibaultFoureur/streamlit-joboffers-analysis).
         """
     )
-    
-    password = st.text_input(
-        "Please enter the password...", type="password", key="password_input"
-    )
-
+    password = st.text_input("Please enter the password...", type="password")
     if password == st.secrets.get("PASSWORD", "default_password"):
         st.session_state["password_correct"] = True
         st.rerun()
     elif password:
         st.error("Incorrect password.")
-        
     return False
 
-# --- Main Application Logic ---
-# The app will only run if the shared password is correct.
-if check_password():
-
-    # Initialize Supabase connection
+# --- Main Application Logic (Final Version with Manual URL) ---
+def main():
     conn = st.connection("supabase", type=SupabaseConnection)
+    query_params = st.query_params
+
+    # --- PKCE: Step 3 - Exchange the code for a session ---
+    if "code" in query_params and "pkce_verifier" in query_params:
+        auth_code = query_params["code"]
+        pkce_verifier = query_params["pkce_verifier"]
+        
+        try:
+            session = conn.auth.exchange_code_for_session({
+                "auth_code": auth_code,
+                "code_verifier": pkce_verifier,
+            })
+            st.markdown(f'<meta http-equiv="refresh" content="0; url=http://lvh.me:8501">', unsafe_allow_html=True)
+            st.stop()
+        except Exception as e:
+            st.error(f"Error during code exchange: {e}")
+            st.stop()
+
+
+    if not check_password(conn):
+        st.stop()
 
     # --- Sidebar for Optional User Login ---
     st.sidebar.header("User Account")
@@ -65,13 +67,30 @@ if check_password():
 
     if not session:
         if st.sidebar.button("Login with Google", type="primary"):
-            auth_url = conn.auth.sign_in_with_oauth({"provider": "google"})
-            st.markdown(f'<meta http-equiv="refresh" content="0; url={auth_url.url}">', unsafe_allow_html=True)
+            
+            pkce_verifier = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b'=').decode('utf-8')
+            pkce_challenge = base64.urlsafe_b64encode(hashlib.sha256(pkce_verifier.encode('utf-8')).digest()).rstrip(b'=').decode('utf-8')
+            
+            redirect_url_with_verifier = f"http://lvh.me:8501?pkce_verifier={pkce_verifier}"
+
+            # Manually construct the authorization URL, bypassing the problematic function.
+            supabase_url = conn.client.supabase_url
+            
+            params = {
+                "provider": "google",
+                "redirect_to": redirect_url_with_verifier,
+                "code_challenge": pkce_challenge,
+                "code_challenge_method": "S256"
+            }
+            auth_url = f"{supabase_url}/auth/v1/authorize?{urlencode(params)}"
+            
+            st.markdown(f'<meta http-equiv="refresh" content="0; url={auth_url}">', unsafe_allow_html=True)
             st.stop()
     else:
         user_email = session.user.email
-        st.sidebar.write(f"Logged in as:")
+        st.sidebar.write("Logged in as:")
         st.sidebar.markdown(f"**{user_email}**")
+        st.success("You have successfully logged in! (For now app is still the same)")
         if st.sidebar.button("Logout"):
             conn.auth.sign_out()
             st.rerun()
@@ -79,7 +98,7 @@ if check_password():
     # --- Data Loading (Simplified) ---
     @st.cache_data
     def load_data_from_supabase():
-        """Loads the final, clean data from the analytics_job_offers dbt model in Supabase."""
+        """Loads the final, clean data."""
         print("Loading data from Supabase...")
         response = conn.client.table("analytics_job_offers").select("*").execute()
         df = pd.DataFrame(response.data)
@@ -492,3 +511,7 @@ if check_password():
                 st.balloons()
             else:
                 st.error("Could not identify user. Please try logging in again.")
+
+# --- Run the main function ---
+if __name__ == "__main__":
+    main()
