@@ -6,37 +6,12 @@ from datetime import date
 from urllib.parse import urlencode
 import json
 import os
-# NEW: Imports needed for the PKCE flow
 import hashlib
 import base64
 
 st.set_page_config(layout="wide")
 
-# --- Refactored Password Check Function ---
-def check_password(conn: SupabaseConnection):
-    if st.session_state.get("password_correct", False):
-        return True
-    if conn.auth.get_session():
-        st.session_state["password_correct"] = True
-        return True
-    st.title("🔑 Protected Access")
-    st.markdown(
-        """
-        This is a private application. Please enter the password to continue.
-        
-        - To request access, please contact me at [t.foureur@gmail.com](mailto:t.foureur@gmail.com).
-        - For more information about the project, visit the [GitHub repository](https://github.com/ThibaultFoureur/streamlit-joboffers-analysis).
-        """
-    )
-    password = st.text_input("Please enter the password...", type="password")
-    if password == st.secrets.get("PASSWORD", "default_password"):
-        st.session_state["password_correct"] = True
-        st.rerun()
-    elif password:
-        st.error("Incorrect password.")
-    return False
-
-# --- Main Application Logic (Final Version with Manual URL) ---
+# --- Main Application Logic ---
 def main():
     conn = st.connection("supabase", type=SupabaseConnection)
     query_params = st.query_params
@@ -51,21 +26,30 @@ def main():
                 "auth_code": auth_code,
                 "code_verifier": pkce_verifier,
             })
+            # Redirect to the base URL to clear the query parameters
             st.markdown(f'<meta http-equiv="refresh" content="0; url=http://lvh.me:8501">', unsafe_allow_html=True)
             st.stop()
         except Exception as e:
             st.error(f"Error during code exchange: {e}")
             st.stop()
 
-
-    if not check_password(conn):
-        st.stop()
-
+    # --- Disclaimer and info to the sidebar ---
+    st.sidebar.info(
+        """
+        **About this Project:**
+        - For questions, contact [t.foureur@gmail.com](mailto:t.foureur@gmail.com).
+        - Explore the code on [GitHub](https://github.com/ThibaultFoureur/streamlit-joboffers-analysis).
+        """
+    )
+    
     # --- Sidebar for Optional User Login ---
     st.sidebar.header("User Account")
     session = conn.auth.get_session()
 
     if not session:
+        # Clear user info if not logged in
+        if 'user' in st.session_state:
+            del st.session_state['user']
         if st.sidebar.button("Login with Google", type="primary"):
             
             pkce_verifier = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b'=').decode('utf-8')
@@ -73,7 +57,6 @@ def main():
             
             redirect_url_with_verifier = f"http://lvh.me:8501?pkce_verifier={pkce_verifier}"
 
-            # Manually construct the authorization URL, bypassing the problematic function.
             supabase_url = conn.client.supabase_url
             
             params = {
@@ -86,13 +69,19 @@ def main():
             
             st.markdown(f'<meta http-equiv="refresh" content="0; url={auth_url}">', unsafe_allow_html=True)
             st.stop()
+
     else:
-        user_email = session.user.email
+        # Store user object in session state
+        st.session_state['user'] = session.user 
+        
+        user_email = st.session_state['user'].email
         st.sidebar.write("Logged in as:")
         st.sidebar.markdown(f"**{user_email}**")
-        st.success("You have successfully logged in! (For now app is still the same)")
         if st.sidebar.button("Logout"):
             conn.auth.sign_out()
+            # Clear the user from session state on logout
+            if 'user' in st.session_state:
+                del st.session_state['user']
             st.rerun()
 
     # --- Data Loading (Simplified) ---
@@ -102,7 +91,6 @@ def main():
         print("Loading data from Supabase...")
         response = conn.client.table("analytics_job_offers").select("*").execute()
         df = pd.DataFrame(response.data)
-        # Ensure array columns are treated as lists, handling potential None values
         for col in ['languages', 'bi_tools', 'cloud_platforms', 'data_modelization', 'work_titles_final']:
             if col in df.columns:
                 df[col] = df[col].apply(lambda x: x if isinstance(x, list) else [])
@@ -111,33 +99,26 @@ def main():
     # --- Match Score Calculation ---
     def calculate_match_score(row, profile):
         score = 0
-        # Score for target roles
         if any(title in row['work_titles_final'] for title in profile.get('target_roles', [])):
             score += 10
         
-        # Score for skills
         all_job_skills = set(row.get('languages', []) + row.get('bi_tools', []) + row.get('cloud_platforms', []) + row.get('data_modelization', []))
         for skill in profile.get('my_skills', []):
             if skill in all_job_skills:
                 score += 3
 
-        # Score for job info (seniority, contract, etc.)
         job_info = {row.get('seniority_category'), row.get('consulting_status'), row.get('schedule_type')}
         if profile.get('all_job_info') and not job_info.isdisjoint(profile.get('all_job_info', [])):
                 score += 5
 
-        # Score for company info
         company_info = {row.get('company_category'), row.get('activity_section_details')}
         if profile.get('all_company_info') and not company_info.isdisjoint(profile.get('all_company_info', [])):
             score += 5
             
-        # NEW: Score for salary
         min_salary_pref = profile.get('min_salary')
         if min_salary_pref and min_salary_pref > 0:
-            # +10 points if the minimum salary meets the preference
             if pd.notna(row['annual_min_salary']) and row['annual_min_salary'] >= min_salary_pref:
                 score += 10
-            # +5 points if the max salary meets the preference (and min did not)
             elif pd.notna(row['annual_max_salary']) and row['annual_max_salary'] >= min_salary_pref:
                 score += 5
                 
@@ -220,8 +201,9 @@ def main():
     if st.sidebar.button("Raw Data & Matching", key="nav_data"):
         st.session_state.page = 'Raw Data & Matching'
 
-    # --- Sidebar ---
+    # --- Sidebar Filters ---
     st.sidebar.header("Filters")
+    # This preset toggle might be removed or changed later per your epic
     st.sidebar.subheader("Filter Presets")
     st.sidebar.toggle("Thibault's Active Search", key="preset_active")
 
@@ -239,9 +221,7 @@ def main():
 
     current_values = PRESET_THIBAULT if st.session_state.preset_active else DEFAULTS
 
-    # --- DISPLAY FILTERS ---
     st.sidebar.subheader("Job Filters")
-
     is_consulting_options = ['Include All'] + sorted(source_df['consulting_status'].dropna().unique().tolist())
     default_consulting = current_values['consulting'] if current_values['consulting'] in is_consulting_options else 'Include All'
     selected_is_consulting = st.sidebar.selectbox('Filter by consulting type:', options=is_consulting_options, index=is_consulting_options.index(default_consulting))
@@ -274,7 +254,7 @@ def main():
         'Filter by company:',
         options=['All companies'] + sorted(source_df['company_name'].dropna().unique().tolist())
     )
-    
+
     # --- Filter Application ---
     df_display = source_df.copy()
     if selected_is_consulting != 'Include All':
@@ -344,7 +324,6 @@ def main():
     elif st.session_state.page == 'Raw Data & Matching':
         st.title(" Explorer Offers by Relevance")
         
-        # --- PROFILE & MATCH SCORE SECTION (IN AN EXPANDER) ---
         with st.expander("Configure my search profile and match score"):
             st.toggle("Activate Thibault's Profile", key="profile_preset_active")
 
@@ -361,7 +340,6 @@ def main():
             }
             current_profile_values = PROFILE_THIBAULT if st.session_state.profile_preset_active else PROFILE_DEFAULTS
 
-            # Explode and combine all skill lists, dropping nulls immediately
             combined_skills = (
                 source_df.explode('languages')['languages'].dropna().tolist() +
                 source_df.explode('bi_tools')['bi_tools'].dropna().tolist() +
@@ -369,29 +347,24 @@ def main():
                 source_df.explode('data_modelization')['data_modelization'].dropna().tolist()
             )
             all_skills = sorted(list(set(combined_skills)))
-
             if "Not specified" in all_skills: 
                 all_skills.remove("Not specified")
 
-            # Prepare options lists
             all_work_titles = sorted(source_df.explode('work_titles_final')['work_titles_final'].dropna().unique().tolist())
             all_job_info_options = sorted(list(set(source_df['seniority_category'].dropna().unique().tolist() + source_df['consulting_status'].dropna().unique().tolist() + source_df['schedule_type'].dropna().unique().tolist())))
             all_company_info_options = sorted(list(set(source_df['company_category'].dropna().unique().tolist() + source_df['activity_section_details'].dropna().unique().tolist())))
 
-            # Create safe defaults by filtering presets against available options
             safe_skills = [s for s in current_profile_values.get('my_skills', []) if s in all_skills]
             safe_roles = [r for r in current_profile_values.get('target_roles', []) if r in all_work_titles]
             safe_job_info = [i for i in current_profile_values.get('all_job_info', []) if i in all_job_info_options]
             safe_company_info = [i for i in current_profile_values.get('all_company_info', []) if i in all_company_info_options]
             default_salary = current_profile_values.get("min_salary")
 
-            # Use the safe defaults in the widgets
             st.session_state.profile['my_skills'] = st.multiselect('My Skills (+3 pts/skill):', options=all_skills, default=safe_skills)
             st.session_state.profile['target_roles'] = st.multiselect('My Target Roles (+10 pts):', options=all_work_titles, default=safe_roles)
             st.session_state.profile['all_job_info'] = st.multiselect('Job Info (+5 pts):', options=all_job_info_options, default=safe_job_info)
             st.session_state.profile['all_company_info'] = st.multiselect("Company Info (+5 pts):", options=all_company_info_options, default=safe_company_info)
             
-            # NEW: Number input for minimum salary
             st.session_state.profile['min_salary'] = st.number_input(
                 'Minimum annual salary in € (+5/10 pts):',
                 value=default_salary or 0,
@@ -401,11 +374,9 @@ def main():
                 format="%d"
             )
         
-        # Recalculate scores and display data
         df_display['match_score'] = df_display.apply(lambda row: calculate_match_score(row, st.session_state.profile), axis=1)
         st.write(f"Displaying **{len(df_display)}** filtered offers.")
 
-        # --- Data editor logic ---
         conn = st.connection("supabase", type=SupabaseConnection)
         response = conn.client.table("tracker").select("*").execute()
         tracker_df = pd.DataFrame(response.data)
@@ -426,9 +397,7 @@ def main():
         other_columns = [col for col in df_prepared.columns if col not in desired_order]
         df_prepared = df_prepared[desired_order + other_columns]
 
-        # --- SESSION STATE UPDATE LOGIC ---
         profile_has_changed = st.session_state.get('profile') != st.session_state.get('last_profile')
-
         try:
             current_ids_in_state = set(st.session_state.df_editor_state['job_id'])
         except (KeyError, AttributeError):
@@ -440,12 +409,10 @@ def main():
             st.session_state.df_editor_state = df_prepared.copy()
             st.session_state.last_profile = st.session_state.profile.copy()
 
-        # Dynamically calculate the maximum possible score based on the current profile
-        max_possible_score = 10 + 5 + 5 # Base score for role, job info, company info
+        max_possible_score = 10 + 5 + 5
         max_possible_score += (3 * len(st.session_state.profile.get('my_skills', [])))
         if st.session_state.profile.get('min_salary', 0) > 0:
-            max_possible_score += 10 # Max points from salary
-            
+            max_possible_score += 10
         if max_possible_score == 0: max_possible_score = 1
 
         edited_df = st.data_editor(
@@ -483,34 +450,22 @@ def main():
             st.rerun()
 
         if st.button("Save My Progress to Supabase"):
-            # Récupérer l'ID de l'utilisateur de la session actuelle
-            # Cela fonctionne que l'utilisateur soit connecté avec Google ou anonyme
             current_user_id = conn.auth.get_session().user.id if conn.auth.get_session() else None
-
             if current_user_id:
-                # Préparer les données pour la sauvegarde
                 updated_tracker = st.session_state.df_editor_state[["job_id", "status", "contact_date", "notes"]].copy()
                 updated_tracker.dropna(subset=['status'], inplace=True)
-                
-                # Ajouter l'ID de l'utilisateur à chaque ligne
                 updated_tracker['user_id'] = current_user_id
-
                 if 'contact_date' in updated_tracker.columns:
                     updated_tracker['contact_date'] = pd.to_datetime(updated_tracker['contact_date']).dt.strftime('%Y-%m-%d')
-                
                 updated_tracker = updated_tracker.astype(object).where(pd.notnull(updated_tracker), None)
-                
-                # 'upsert' mettra à jour les entrées existantes ou en créera de nouvelles
-                # Il doit savoir sur quelle(s) colonne(s) se baser pour détecter un conflit (une ligne existante)
                 conn.client.table("tracker").upsert(
                     updated_tracker.to_dict(orient="records"),
-                    on_conflict="job_id,user_id" # Conflit si une ligne existe déjà pour ce job ET cet utilisateur
+                    on_conflict="job_id,user_id"
                 ).execute()
-                
                 st.success("Your application progress has been saved to Supabase! 🚀")
                 st.balloons()
             else:
-                st.error("Could not identify user. Please try logging in again.")
+                st.warning("Please log in to save your progress.")
 
 # --- Run the main function ---
 if __name__ == "__main__":
