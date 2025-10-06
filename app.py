@@ -41,12 +41,15 @@ def main():
         - Explore the code on [GitHub](https://github.com/ThibaultFoureur/streamlit-joboffers-analysis).
         """
     )
-
+    
     # --- Sidebar for Optional User Login ---
     st.sidebar.header("User Account")
     session = conn.auth.get_session()
 
     if not session:
+        # Clear user info if not logged in
+        if 'user' in st.session_state:
+            del st.session_state['user']
         if st.sidebar.button("Login with Google", type="primary"):
             
             pkce_verifier = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b'=').decode('utf-8')
@@ -66,12 +69,19 @@ def main():
             
             st.markdown(f'<meta http-equiv="refresh" content="0; url={auth_url}">', unsafe_allow_html=True)
             st.stop()
+
     else:
-        user_email = session.user.email
+        # Store user object in session state
+        st.session_state['user'] = session.user 
+        
+        user_email = st.session_state['user'].email
         st.sidebar.write("Logged in as:")
         st.sidebar.markdown(f"**{user_email}**")
         if st.sidebar.button("Logout"):
             conn.auth.sign_out()
+            # Clear the user from session state on logout
+            if 'user' in st.session_state:
+                del st.session_state['user']
             st.rerun()
 
     # --- Data Loading (Simplified) ---
