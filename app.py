@@ -211,6 +211,7 @@ def main():
     if 'last_profile' not in st.session_state: st.session_state.last_profile = {}
     if 'active_filter_preset' not in st.session_state: st.session_state.active_filter_preset = None
     if 'active_search_preset' not in st.session_state: st.session_state.active_search_preset = None
+    if 'superuser_access' not in st.session_state: st.session_state.superuser_access = False
 
     # --- Page Navigation ---
     st.sidebar.header("Navigation")
@@ -220,6 +221,9 @@ def main():
         st.session_state.page = 'Skills Summary'
     if st.sidebar.button("Raw Data & Matching", key="nav_data"):
         st.session_state.page = 'Raw Data & Matching'
+    if 'user' in st.session_state:
+        if st.sidebar.button("RESTRICTED - Configure new search", key="nav_superuser"):
+            st.session_state.page = 'Superuser'
 
     # --- Sidebar Filters ---
     st.sidebar.header("Filters")
@@ -598,6 +602,88 @@ def main():
                 st.balloons()
             else:
                 st.warning("Please log in to save your progress.")
+    
+    elif st.session_state.page == 'Superuser':
+        st.title("🔒 RESTRICTED - Configure Job Search")
+
+        if st.session_state.superuser_access:
+            st.success("Access Granted!")
+            
+            user_id = st.session_state['user'].id
+            
+            # --- NEW: Define the callback function ---
+            def add_category_callback():
+                # Get the value from the text input's state
+                new_name = st.session_state.new_skill_category_name
+                if new_name and new_name not in st.session_state.skill_categories:
+                    # Add the new category to our skills dictionary
+                    st.session_state.skill_categories[new_name] = ""
+                    # NOW it's safe to clear the input's state for the next rerun
+                    st.session_state.new_skill_category_name = ""
+
+            # Initialize session state for skills if it doesn't exist
+            if 'skill_categories' not in st.session_state:
+                existing_config = conn.client.table("user_configs").select("search_skills").eq("user_id", user_id).execute().data
+                if existing_config and existing_config[0].get("search_skills"):
+                    skills_from_db = existing_config[0]["search_skills"]
+                    st.session_state.skill_categories = {k: ", ".join(v) for k, v in skills_from_db.items()}
+                else:
+                    st.session_state.skill_categories = {}
+
+            st.subheader("Skill Keywords")
+
+            # --- UI for MANAGING skill categories (OUTSIDE the form) ---
+            st.text_input("New Skill Category Name", key="new_skill_category_name", placeholder="Languages")
+            # UPDATED: Use the on_click parameter to call our function
+            st.button("Add Category", on_click=add_category_callback)
+
+            # Display delete buttons for existing categories
+            for category in list(st.session_state.skill_categories.keys()):
+                col1, col2 = st.columns([4, 1])
+                with col1:
+                    st.markdown(f"**{category}**")
+                with col2:
+                    if st.button(f"❌", key=f"delete_btn_{category}", help=f"Delete '{category}'"):
+                        del st.session_state.skill_categories[category]
+                        st.rerun()
+
+            # --- The form for ENTERING data ---
+            with st.form("config_form"):
+                # ... (The rest of your form code remains exactly the same)
+                # Fetch existing config for non-skill fields
+                existing_config = conn.client.table("user_configs").select("search_queries, search_location").eq("user_id", user_id).execute().data
+                default_queries = "\n".join(existing_config[0]['search_queries']) if existing_config else ""
+                default_location = existing_config[0]['search_location'] if existing_config else ""
+
+                st.subheader("Search Parameters")
+                queries_text = st.text_area("Job Titles / Keywords (comma separated)", value=default_queries, height=150,
+                                            placeholder="Analytics Engineer,BI Analyst")
+                location_text = st.text_input("One location (e.g., city, country)", value=default_location,
+                                              placeholder="Paris")
+
+                st.subheader("Skill Values")
+                for category in st.session_state.skill_categories:
+                    st.session_state.skill_categories[category] = st.text_area(
+                        label=f"{category} (comma-separated)",
+                        value=st.session_state.skill_categories[category],
+                        key=f"skill_input_{category}",
+                        placeholder="English,French,Arabic,Spanish"
+                    )
+                
+                submitted = st.form_submit_button("Save Entire Configuration")
+
+            # --- Handle form submission (remains the same) ---
+            if submitted:
+                # ... (your existing submission logic)
+                pass
+
+        else:
+            password = st.text_input("Enter Superuser Password", type="password")
+            if password == st.secrets["PASSWORD"]:
+                st.session_state.superuser_access = True
+                st.rerun()
+            elif password:
+                st.error("Incorrect password.")
 
 # --- Run the main function ---
 if __name__ == "__main__":
