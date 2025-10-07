@@ -16,6 +16,12 @@ def main():
     conn = st.connection("supabase", type=SupabaseConnection)
     query_params = st.query_params
 
+    # Determine the base URL based on the environment ---
+    if os.environ.get("APP_ENV") == "production":
+        base_url = "https://app-joboffers-analysis.streamlit.app"
+    else:
+        base_url = "http://lvh.me:8501"
+
     # --- PKCE: Step 3 - Exchange the code for a session ---
     if "code" in query_params and "pkce_verifier" in query_params:
         auth_code = query_params["code"]
@@ -27,7 +33,7 @@ def main():
                 "code_verifier": pkce_verifier,
             })
             # Redirect to the base URL to clear the query parameters
-            st.markdown(f'<meta http-equiv="refresh" content="0; url=http://lvh.me:8501">', unsafe_allow_html=True)
+            st.markdown(f'<meta http-equiv="refresh" content="0; url={base_url}">', unsafe_allow_html=True)
             st.stop()
         except Exception as e:
             st.error(f"Error during code exchange: {e}")
@@ -38,10 +44,10 @@ def main():
         """
         **About this Project:**
         - For questions, contact [t.foureur@gmail.com](mailto:t.foureur@gmail.com).
-        - Explore the code on [GitHub](https://github.com/ThibaultFoureur/streamlit-joboffers-analysis).
+        - Explore the code on [GitHub](https://github.com/DEFAULTFoureur/streamlit-joboffers-analysis).
         """
     )
-    
+
     # --- Sidebar for Optional User Login ---
     st.sidebar.header("User Account")
     session = conn.auth.get_session()
@@ -54,8 +60,8 @@ def main():
             
             pkce_verifier = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b'=').decode('utf-8')
             pkce_challenge = base64.urlsafe_b64encode(hashlib.sha256(pkce_verifier.encode('utf-8')).digest()).rstrip(b'=').decode('utf-8')
-            
-            redirect_url_with_verifier = f"http://lvh.me:8501?pkce_verifier={pkce_verifier}"
+
+            redirect_url_with_verifier = f"{base_url}?pkce_verifier={pkce_verifier}"
 
             supabase_url = conn.client.supabase_url
             
@@ -203,9 +209,9 @@ def main():
 
     # --- Sidebar Filters ---
     st.sidebar.header("Filters")
-    # This preset toggle might be removed or changed later per your epic
-    st.sidebar.subheader("Filter Presets")
-    st.sidebar.toggle("Thibault's Active Search", key="preset_active")
+    # Show the hardcoded toggle only if the user is NOT logged in
+    if 'user' not in st.session_state:
+        st.sidebar.toggle("Default Active Search", key="preset_active")
 
     # Definition of default values and presets
     DEFAULTS = {
@@ -213,47 +219,82 @@ def main():
         'titles': [], 'category': 'All categories', 'sector': 'All sectors',
         'category_company': [],
     }
-    PRESET_THIBAULT = {
+    PRESET_DEFAULT = {
         'consulting': 'Internal position', 'schedule': 'Full-time', 'seniority_category': ["Senior/Expert", "Not specified"],
         'titles': ["BI/Decision Support Specialist", "Analytics Engineer", "Business/Functional Analyst", "Data Analyst"],
         'category_company': ['Large Enterprise', 'Intermediate-sized Enterprise'], 'sector': 'All sectors', 'company': 'All companies'
     }
 
-    current_values = PRESET_THIBAULT if st.session_state.preset_active else DEFAULTS
+    # Use the preset toggle only if the user is anonymous
+    use_preset = st.session_state.get('preset_active', False) and 'user' not in st.session_state
+    current_values = PRESET_DEFAULT if use_preset else DEFAULTS
 
-    st.sidebar.subheader("Job Filters")
-    is_consulting_options = ['Include All'] + sorted(source_df['consulting_status'].dropna().unique().tolist())
-    default_consulting = current_values['consulting'] if current_values['consulting'] in is_consulting_options else 'Include All'
-    selected_is_consulting = st.sidebar.selectbox('Filter by consulting type:', options=is_consulting_options, index=is_consulting_options.index(default_consulting))
+    with st.sidebar.expander("Job Filters"):
+        is_consulting_options = ['Include All'] + sorted(source_df['consulting_status'].dropna().unique().tolist())
+        default_consulting = current_values['consulting'] if current_values['consulting'] in is_consulting_options else 'Include All'
+        selected_is_consulting = st.selectbox('Filter by consulting type:', options=is_consulting_options, index=is_consulting_options.index(default_consulting))
 
-    schedule_type_options = ['All types'] + sorted(source_df['schedule_type'].dropna().unique().tolist())
-    selected_schedule_type = st.sidebar.selectbox(
-        'Filter by contract type:', options=schedule_type_options,
-        index=schedule_type_options.index(current_values['schedule']) if current_values['schedule'] in schedule_type_options else 0
-    )
+        schedule_type_options = ['All types'] + sorted(source_df['schedule_type'].dropna().unique().tolist())
+        selected_schedule_type = st.selectbox(
+            'Filter by contract type:', options=schedule_type_options,
+            index=schedule_type_options.index(current_values['schedule']) if current_values['schedule'] in schedule_type_options else 0
+        )
+        
+        seniority_options = sorted(source_df['seniority_category'].unique().tolist())
+        safe_seniority_defaults = [s for s in current_values['seniority_category'] if s in seniority_options]
+        selected_seniority = st.multiselect('Select seniority levels:', options=seniority_options, default=safe_seniority_defaults)
+
+        all_work_titles = sorted(source_df.explode('work_titles_final')['work_titles_final'].dropna().unique().tolist())
+        safe_titles_defaults = [t for t in current_values['titles'] if t in all_work_titles]
+        selected_work_titles = st.multiselect('Select specific job titles:', options=all_work_titles, default=safe_titles_defaults)
     
-    seniority_options = sorted(source_df['seniority_category'].unique().tolist())
-    safe_seniority_defaults = [s for s in current_values['seniority_category'] if s in seniority_options]
-    selected_seniority = st.sidebar.multiselect('Select seniority levels:', options=seniority_options, default=safe_seniority_defaults)
+    with st.sidebar.expander("Company Filters"):
+        category_options = ['All categories'] + sorted(source_df['company_category'].dropna().unique().tolist())
+        selected_category_company = st.multiselect(
+            "Filter by company category:", options=category_options,
+            default=current_values.get('category_company', [])
+        )
+        selected_sector_company = st.selectbox(
+            "Filter by company sector:",
+            options=['All sectors'] + sorted(source_df['activity_section_details'].dropna().unique().tolist())
+        )
+        selected_company = st.selectbox(
+            'Filter by company:',
+            options=['All companies'] + sorted(source_df['company_name'].dropna().unique().tolist())
+        )
 
-    all_work_titles = sorted(source_df.explode('work_titles_final')['work_titles_final'].dropna().unique().tolist())
-    safe_titles_defaults = [t for t in current_values['titles'] if t in all_work_titles]
-    selected_work_titles = st.sidebar.multiselect('Select specific job titles:', options=all_work_titles, default=safe_titles_defaults)
-    
-    st.sidebar.subheader("Company Filters")
-    category_options = ['All categories'] + sorted(source_df['company_category'].dropna().unique().tolist())
-    selected_category_company = st.sidebar.multiselect(
-        "Filter by company category:", options=category_options,
-        default=current_values['category_company']
-    )
-    selected_sector_company = st.sidebar.selectbox(
-        "Filter by company sector:",
-        options=['All sectors'] + sorted(source_df['activity_section_details'].dropna().unique().tolist())
-    )
-    selected_company = st.sidebar.selectbox(
-        'Filter by company:',
-        options=['All companies'] + sorted(source_df['company_name'].dropna().unique().tolist())
-    )
+    # This section now runs AFTER the variables above have been created.
+    if 'user' in st.session_state:
+        st.sidebar.subheader("My Filters Presets")
+        preset_name = st.sidebar.text_input("Enter preset name to save")
+
+        if st.sidebar.button("Save Current Filters"):
+            if preset_name:
+                user_id = st.session_state['user'].id
+                
+                current_filters_payload = {
+                    "consulting": selected_is_consulting,
+                    "schedule": selected_schedule_type,
+                    "seniority_category": selected_seniority,
+                    "titles": selected_work_titles,
+                    "category_company": selected_category_company,
+                    "sector": selected_sector_company,
+                    "company": selected_company
+                }
+                
+                record = {
+                    "user_id": user_id,
+                    "preset_name": preset_name,
+                    "filters": current_filters_payload
+                }
+                
+                try:
+                    conn.client.table("user_filter_presets").insert(record).execute()
+                    st.sidebar.success(f"Preset '{preset_name}' saved!")
+                except Exception as e:
+                    st.sidebar.error(f"Error saving preset: {e}")
+            else:
+                st.sidebar.warning("Please enter a name for your preset.")
 
     # --- Filter Application ---
     df_display = source_df.copy()
@@ -325,20 +366,20 @@ def main():
         st.title(" Explorer Offers by Relevance")
         
         with st.expander("Configure my search profile and match score"):
-            st.toggle("Activate Thibault's Profile", key="profile_preset_active")
+            st.toggle("Activate Default Profile", key="profile_preset_active")
 
             PROFILE_DEFAULTS = {
                 "my_skills": [], "target_roles": [], "all_job_info": [],
                 "all_company_info": [], "min_salary": None
             }
-            PROFILE_THIBAULT = {
+            PROFILE_DEFAULT = {
                 "my_skills": ["python", "sql", "tableau","excel","looker","gcp","dbt"],
                 "target_roles": ["Data Analyst", "Analytics Engineer"],
                 "all_job_info": ["Senior/Expert", "Not specified", "Internal position", "Full-time"],
                 "all_company_info": ['Large Enterprise', 'Intermediate-sized Enterprise'],
                 "min_salary": 55000
             }
-            current_profile_values = PROFILE_THIBAULT if st.session_state.profile_preset_active else PROFILE_DEFAULTS
+            current_profile_values = PROFILE_DEFAULT if st.session_state.profile_preset_active else PROFILE_DEFAULTS
 
             combined_skills = (
                 source_df.explode('languages')['languages'].dropna().tolist() +
@@ -364,7 +405,6 @@ def main():
             st.session_state.profile['target_roles'] = st.multiselect('My Target Roles (+10 pts):', options=all_work_titles, default=safe_roles)
             st.session_state.profile['all_job_info'] = st.multiselect('Job Info (+5 pts):', options=all_job_info_options, default=safe_job_info)
             st.session_state.profile['all_company_info'] = st.multiselect("Company Info (+5 pts):", options=all_company_info_options, default=safe_company_info)
-            
             st.session_state.profile['min_salary'] = st.number_input(
                 'Minimum annual salary in € (+5/10 pts):',
                 value=default_salary or 0,
@@ -373,6 +413,31 @@ def main():
                 step=1000,
                 format="%d"
             )
+
+            # --- NEW: Save Search Profile button ---
+            if 'user' in st.session_state:
+                st.markdown("---")
+                profile_preset_name = st.text_input("Enter profile name to save")
+                if st.button("Save Current Search Profile"):
+                    if profile_preset_name:
+                        user_id = st.session_state['user'].id
+
+                        # The profile data is already in st.session_state.profile
+                        profile_payload = st.session_state.profile
+
+                        record = {
+                            "user_id": user_id,
+                            "preset_name": profile_preset_name,
+                            "score_matchings": profile_payload # Save as JSONB
+                        }
+
+                        try:
+                            conn.client.table("user_search_presets").insert(record).execute()
+                            st.success(f"Profile '{profile_preset_name}' saved!")
+                        except Exception as e:
+                            st.error(f"Error saving profile: {e}")
+                    else:
+                        st.warning("Please enter a name for your profile.")
         
         df_display['match_score'] = df_display.apply(lambda row: calculate_match_score(row, st.session_state.profile), axis=1)
         st.write(f"Displaying **{len(df_display)}** filtered offers.")
