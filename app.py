@@ -183,7 +183,19 @@ def main():
         else:
             st.info(f"No data found for '{title}' in this selection.")
 
+    # --- Helper functions to load presets ---
+    @st.cache_data(ttl=10)
+    def load_filter_presets(user_id):
+        """Fetches all filter presets for a given user."""
+        response = conn.client.table("user_filter_presets").select("id, preset_name, filters").eq("user_id", user_id).execute()
+        return response.data
 
+    @st.cache_data(ttl=10)
+    def load_search_presets(user_id):
+        """Fetches all search score presets for a given user."""
+        response = conn.client.table("user_search_presets").select("id, preset_name, search_scores").eq("user_id", user_id).execute()
+        return response.data
+    
     # --- Initial Data Load ---
     try:
         source_df = load_data_from_supabase()
@@ -197,6 +209,8 @@ def main():
     if 'profile_preset_active' not in st.session_state: st.session_state.profile_preset_active = False
     if 'profile' not in st.session_state: st.session_state.profile = {}
     if 'last_profile' not in st.session_state: st.session_state.last_profile = {}
+    if 'active_filter_preset' not in st.session_state: st.session_state.active_filter_preset = None
+    if 'active_search_preset' not in st.session_state: st.session_state.active_search_preset = None
 
     # --- Page Navigation ---
     st.sidebar.header("Navigation")
@@ -209,8 +223,35 @@ def main():
 
     # --- Sidebar Filters ---
     st.sidebar.header("Filters")
-    # Show the hardcoded toggle only if the user is NOT logged in
-    if 'user' not in st.session_state:
+
+    # --- Preset Loading and Selection Logic ---
+    if 'user' in st.session_state:
+        user_id = st.session_state['user'].id
+        filter_presets = load_filter_presets(user_id)
+
+        if len(filter_presets) == 1:
+            st.sidebar.subheader("Filter Presets")
+            preset = filter_presets[0]
+            is_toggled = st.sidebar.toggle(f"Activate '{preset['preset_name']}'")
+            if is_toggled:
+                st.session_state.active_filter_preset = preset['filters']
+            else:
+                st.session_state.active_filter_preset = None
+        
+        elif len(filter_presets) > 1:
+            st.sidebar.subheader("Filter Presets")
+            preset_options = {p['preset_name']: p['filters'] for p in filter_presets}
+            preset_names = ["No preset active"] + list(preset_options.keys())
+            
+            selected_preset_name = st.sidebar.selectbox("Select a saved preset:", options=preset_names)
+            
+            if selected_preset_name != "No preset active":
+                st.session_state.active_filter_preset = preset_options[selected_preset_name]
+            else:
+                st.session_state.active_filter_preset = None
+    else:
+        # Logic for anonymous users remains the same
+        st.sidebar.subheader("Filter Presets")
         st.sidebar.toggle("Default Active Search", key="preset_active")
 
     # Definition of default values and presets
@@ -225,9 +266,15 @@ def main():
         'category_company': ['Large Enterprise', 'Intermediate-sized Enterprise'], 'sector': 'All sectors', 'company': 'All companies'
     }
 
-    # Use the preset toggle only if the user is anonymous
-    use_preset = st.session_state.get('preset_active', False) and 'user' not in st.session_state
-    current_values = PRESET_DEFAULT if use_preset else DEFAULTS
+    if st.session_state.active_filter_preset:
+        # A logged-in user has an active preset
+        current_values = st.session_state.active_filter_preset
+    elif 'user' not in st.session_state and st.session_state.get('preset_active'):
+        # Anonymous user has the default preset toggled
+        current_values = PRESET_DEFAULT
+    else:
+        # No preset is active
+        current_values = DEFAULTS
 
     with st.sidebar.expander("Job Filters"):
         is_consulting_options = ['Include All'] + sorted(source_df['consulting_status'].dropna().unique().tolist())
@@ -265,7 +312,7 @@ def main():
 
     # This section now runs AFTER the variables above have been created.
     if 'user' in st.session_state:
-        st.sidebar.subheader("My Filters Presets")
+        st.sidebar.subheader("Saving a new Preset")
         preset_name = st.sidebar.text_input("Enter preset name to save")
 
         if st.sidebar.button("Save Current Filters"):
@@ -366,20 +413,40 @@ def main():
         st.title(" Explorer Offers by Relevance")
         
         with st.expander("Configure my search profile and match score"):
-            st.toggle("Activate Default Profile", key="profile_preset_active")
+            # --- Search Profile Preset Loading Logic ---
+            if 'user' in st.session_state:
+                user_id = st.session_state['user'].id
+                search_presets = load_search_presets(user_id)
 
-            PROFILE_DEFAULTS = {
-                "my_skills": [], "target_roles": [], "all_job_info": [],
-                "all_company_info": [], "min_salary": None
-            }
-            PROFILE_DEFAULT = {
-                "my_skills": ["python", "sql", "tableau","excel","looker","gcp","dbt"],
-                "target_roles": ["Data Analyst", "Analytics Engineer"],
-                "all_job_info": ["Senior/Expert", "Not specified", "Internal position", "Full-time"],
-                "all_company_info": ['Large Enterprise', 'Intermediate-sized Enterprise'],
-                "min_salary": 55000
-            }
-            current_profile_values = PROFILE_DEFAULT if st.session_state.profile_preset_active else PROFILE_DEFAULTS
+                if len(search_presets) == 1:
+                    preset = search_presets[0]
+                    is_toggled = st.toggle(f"Activate '{preset['preset_name']}' profile", key="toggle_search_preset")
+                    if is_toggled:
+                        st.session_state.active_search_preset = preset['search_scores']
+                    else:
+                        st.session_state.active_search_preset = None
+
+                elif len(search_presets) > 1:
+                    preset_options = {p['preset_name']: p['search_scores'] for p in search_presets}
+                    preset_names = ["No preset active"] + list(preset_options.keys())
+                    selected_preset_name = st.selectbox("Select a saved profile:", options=preset_names, key="select_search_preset")
+                    if selected_preset_name != "No preset active":
+                        st.session_state.active_search_preset = preset_options[selected_preset_name]
+                    else:
+                        st.session_state.active_search_preset = None
+            else:
+                st.toggle("Activate Default Profile", key="profile_preset_active")
+
+            # --- Logic to Determine Which Profile to Apply ---
+            PROFILE_DEFAULTS = { "my_skills": [], "target_roles": [], "all_job_info": [], "all_company_info": [], "min_salary": None }
+            PROFILE_DEFAULT = { "my_skills": ["python", "sql", "tableau", "excel", "looker", "gcp", "dbt"], "target_roles": ["Data Analyst", "Analytics Engineer"], "all_job_info": ["Senior/Expert", "Not specified", "Internal position", "Full-time"], "all_company_info": ['Large Enterprise', 'Intermediate-sized Enterprise'], "min_salary": 55000 }
+
+            if st.session_state.active_search_preset:
+                current_profile_values = st.session_state.active_search_preset
+            elif 'user' not in st.session_state and st.session_state.get('profile_preset_active'):
+                current_profile_values = PROFILE_DEFAULT
+            else:
+                current_profile_values = PROFILE_DEFAULTS
 
             combined_skills = (
                 source_df.explode('languages')['languages'].dropna().tolist() +
@@ -428,7 +495,7 @@ def main():
                         record = {
                             "user_id": user_id,
                             "preset_name": profile_preset_name,
-                            "score_matchings": profile_payload # Save as JSONB
+                            "search_scores": profile_payload # Save as JSONB
                         }
 
                         try:
