@@ -93,13 +93,13 @@ def main():
     # --- Data Loading (Simplified) ---
     @st.cache_data
     def load_data_from_supabase():
-        """Loads the final, clean data."""
+        """Loads the final, clean data from the analytics table."""
         print("Loading data from Supabase...")
         response = conn.client.table("analytics_job_offers").select("*").execute()
         df = pd.DataFrame(response.data)
-        for col in ['languages', 'bi_tools', 'cloud_platforms', 'data_modelization', 'work_titles_final']:
-            if col in df.columns:
-                df[col] = df[col].apply(lambda x: x if isinstance(x, list) else [])
+        if 'found_skills' in df.columns:
+            # Ensure it's treated as a dictionary, replacing None with an empty dict
+            df['found_skills'] = df['found_skills'].apply(lambda x: x if isinstance(x, dict) else {})
         return df
 
     # --- Match Score Calculation ---
@@ -108,10 +108,16 @@ def main():
         if any(title in row['work_titles_final'] for title in profile.get('target_roles', [])):
             score += 10
         
-        all_job_skills = set(row.get('languages', []) + row.get('bi_tools', []) + row.get('cloud_platforms', []) + row.get('data_modelization', []))
-        for skill in profile.get('my_skills', []):
-            if skill in all_job_skills:
-                score += 3
+        if 'found_skills' in row and isinstance(row['found_skills'], dict):
+            # 1. Flatten all found skills for the current job into a single set
+            all_job_skills = set()
+            for category_skills in row['found_skills'].values():
+                all_job_skills.update(category_skills)
+
+            # 2. Check if any of the user's preferred skills are in that set
+            for skill in profile.get('my_skills', []):
+                if skill in all_job_skills:
+                    score += 3
 
         job_info = {row.get('seniority_category'), row.get('consulting_status'), row.get('schedule_type')}
         if profile.get('all_job_info') and not job_info.isdisjoint(profile.get('all_job_info', [])):
@@ -370,13 +376,37 @@ def main():
     if st.session_state.page == 'Skills Summary':
         st.title("📊 Market Skills Summary")
         st.write(f"Analysis of **{len(df_display)}** filtered job offers.")
-        st.header("Most In-Demand Technical Skills")
-        plot_top_keywords_plotly(df_display, 'bi_tools', title="Top BI Tools / Technical Solutions")
-        st.markdown("---") 
-        plot_top_keywords_plotly(df_display, 'languages', title="Top Technical Languages")
-        st.markdown("---") 
-        plot_top_keywords_plotly(df_display, 'cloud_platforms', title="Top Cloud & Data Platforms")
-        st.markdown("---") 
+        st.header("Most In-Demand Skills")
+        
+        #1. Aggregate all skills from the 'found_skills' column into a temporary DataFrame
+        all_skills_list = []
+        for index, row in df_display.iterrows():
+            for category, skills in row['found_skills'].items():
+                for skill in skills:
+                    all_skills_list.append({'category': category.replace('_', ' ').title(), 'skill': skill})
+        
+        if not all_skills_list:
+            st.info("No technical skills were found in the selected job offers.")
+        else:
+            skills_df = pd.DataFrame(all_skills_list)
+            
+            # 2. Get a sorted list of unique categories
+            unique_categories = sorted(skills_df['category'].unique())
+
+            # 3. Loop through categories and create a plot for each one
+            for category in unique_categories:
+                category_skills = skills_df[skills_df['category'] == category]
+                
+                # Use a dummy DataFrame for plotting since plot_value_counts_plotly expects one
+                # The function simply counts the values in the specified column
+                plot_value_counts_plotly(
+                    category_skills,
+                    'skill',
+                    top_n=10,
+                    title=f"Top {category}"
+                )
+                st.markdown("---")
+
     elif st.session_state.page == 'Job Offer Breakdown':
         st.title("📄 Job Offer Breakdown")
         st.write(f"Analysis of **{len(df_display)}** filtered job offers.")
@@ -452,14 +482,13 @@ def main():
             else:
                 current_profile_values = PROFILE_DEFAULTS
 
-            combined_skills = (
-                source_df.explode('languages')['languages'].dropna().tolist() +
-                source_df.explode('bi_tools')['bi_tools'].dropna().tolist() +
-                source_df.explode('cloud_platforms')['cloud_platforms'].dropna().tolist() +
-                source_df.explode('data_modelization')['data_modelization'].dropna().tolist()
-            )
-            all_skills = sorted(list(set(combined_skills)))
-            if "Not specified" in all_skills: 
+            combined_skills = set()
+            for skills_dict in source_df['found_skills']:
+                for skill_list in skills_dict.values():
+                    combined_skills.update(skill_list)
+
+            all_skills = sorted(list(combined_skills))
+            if "Not specified" in all_skills:
                 all_skills.remove("Not specified")
 
             all_work_titles = sorted(source_df.explode('work_titles_final')['work_titles_final'].dropna().unique().tolist())
