@@ -40,15 +40,9 @@ models:
       - name: posted_at
         description: "The string indicating when the job was posted (e.g., 'il y a 11 heures')."
 
-      - name: languages
-        description: "An array of programming languages keywords found in the job's full text."
+      - name: found_skills
+        description: "The array of skill category json object and its list of matched skill."
 
-      - name: bi_tools
-        description: "An array of Business Intelligence tool keywords found in the job's full text."
-
-      - name: cloud_platforms
-        description: "An array of cloud platform keywords found in the job's full text."
-      
       - name: apply_link_1
         description: "The primary application link for the job offer."
         # A simple not_null test could be too strict, as some jobs might not have a link.

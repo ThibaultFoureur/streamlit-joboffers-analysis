@@ -104,131 +104,111 @@ annual_salary AS (
     FROM salary_calculations
 ),
 
-keywords_extracted AS (
+all_user_skills AS (
+    SELECT
+        config.user_id,
+        all_skills.category,
+        LOWER(skills.keyword) AS keyword
+    FROM
+        user_configs AS config,
+        -- This unnests the JSONB object into key/value pairs (e.g., 'languages', '["python", "sql"]')
+        LATERAL jsonb_each_text(config.search_skills) AS all_skills(category, keywords_json_array)
+        -- This unnests the JSON array into individual text values (e.g., 'python', 'sql')
+        , LATERAL jsonb_array_elements_text(all_skills.keywords_json_array::jsonb) AS skills(keyword)
+),
 
+matched_skills AS (
+    SELECT
+        jobs.job_id,
+        skills.category,
+        skills.keyword
+    FROM
+        renamed_and_cast AS jobs
+    LEFT JOIN
+        all_user_skills AS skills
+        ON CASE
+            -- For any keyword 3 characters or less, use strict whole-word regex
+            WHEN LENGTH(skills.keyword) <= 3 THEN jobs.full_text ~* ('\m' || skills.keyword || '\M')
+            
+            -- For all longer keywords, use the more flexible ILIKE
+            ELSE jobs.full_text ILIKE '%' || skills.keyword || '%'
+           END
+    WHERE
+        skills.keyword IS NOT NULL
+),
+
+aggregated_skills AS (
+    SELECT
+        job_id,
+        -- This function builds a JSON object from the aggregated key/value pairs
+        jsonb_object_agg(
+            category,
+            keyword_array
+        ) AS found_skills
+    FROM (
+        -- First, group by category to create an array of unique keywords found for that category
+        SELECT
+            job_id,
+            category,
+            jsonb_agg(DISTINCT keyword) AS keyword_array
+        FROM
+            matched_skills
+        GROUP BY
+            job_id, category
+    ) AS grouped_by_category
+    GROUP BY
+        job_id
+),
+
+final_enrichments AS (
     SELECT
         r.*,
         a.annual_min_salary,
         a.annual_max_salary,
-
-        -- A flag to easily filter for jobs with salary info
+        COALESCE(agg_skills.found_skills, '{}'::jsonb) AS found_skills, -- Use the new dynamic skills object
         CASE WHEN a.salary IS NOT NULL THEN TRUE ELSE FALSE END AS is_salary_mentioned,
-
-        -- Translate the schedule type from French to English - First found win
         CASE
             WHEN r.original_schedule_type ILIKE '%Stage%' THEN 'Internship'
             WHEN r.original_schedule_type ILIKE '%Prestataire%' THEN 'Contractor'
             WHEN r.original_schedule_type ILIKE '%À temps partiel%' THEN 'Part-time'
             WHEN r.original_schedule_type ILIKE '%À plein temps%' THEN 'Full-time'
-            ELSE r.original_schedule_type -- Fallback for untranslated values
+            ELSE r.original_schedule_type
         END AS schedule_type,
-
-        -- Logic to extract programming languages into an array
+        -- Categorize job titles (this logic remains the same)
         ARRAY(
             SELECT unnested FROM (
                 SELECT UNNEST(ARRAY[
-                    CASE WHEN full_text ILIKE '%python%' THEN 'python' END,
-                    CASE WHEN full_text ILIKE '%sql%' THEN 'sql' END,
-                    CASE WHEN full_text ILIKE '% r %' THEN 'r' END,
-                    CASE WHEN full_text ILIKE '%scala%' THEN 'scala' END,
-                    CASE WHEN full_text ILIKE '%sas%' THEN 'sas' END,
-                    CASE WHEN full_text ILIKE '%vba%' THEN 'vba' END,
-                    CASE WHEN full_text ILIKE '%dax%' THEN 'dax' END,
-                    CASE WHEN full_text ILIKE '%mdx%' THEN 'mdx' END
-                ]) AS unnested
-            ) AS subquery WHERE unnested IS NOT NULL
-        ) AS languages,
-        
-        -- Logic for BI tools
-        ARRAY(
-            SELECT unnested FROM (
-                SELECT UNNEST(ARRAY[
-                    CASE WHEN full_text ILIKE '%tableau%' THEN 'tableau' END,
-                    CASE WHEN full_text ILIKE ANY (ARRAY['%power bi%', '%powerbi%', '%pbi%']) THEN 'power bi' END,
-                    CASE WHEN full_text ILIKE '%looker%' THEN 'looker' END,
-                    CASE WHEN full_text ILIKE '%qlik%' THEN 'qlik' END,
-                    CASE WHEN full_text ILIKE ANY (ARRAY['%business objects%', '% bo %']) THEN 'business objects' END,
-                    CASE WHEN full_text ILIKE '%excel%' THEN 'excel' END,
-                    CASE WHEN full_text ILIKE '%dataiku%' THEN 'dataiku' END
-                ]) AS unnested
-            ) AS subquery WHERE unnested IS NOT NULL
-        ) AS bi_tools,
-
-        -- Logic for cloud platforms
-        ARRAY(
-            SELECT unnested FROM (
-                SELECT UNNEST(ARRAY[
-                    CASE WHEN full_text ILIKE '%aws%' THEN 'aws' END,
-                    CASE WHEN full_text ILIKE '%azure%' THEN 'azure' END,
-                    CASE WHEN full_text ILIKE '%gcp%' THEN 'gcp' END,
-                    CASE WHEN full_text ILIKE '%snowflake%' THEN 'snowflake' END,
-                    CASE WHEN full_text ILIKE '%databricks%' THEN 'databricks' END
-                ]) AS unnested
-            ) AS subquery WHERE unnested IS NOT NULL
-        ) AS cloud_platforms,
-
-        -- Logic for data modeling tools and concepts
-        ARRAY(
-            SELECT unnested FROM (
-                SELECT UNNEST(ARRAY[
-                    CASE WHEN full_text ILIKE '%dbt%' THEN 'dbt' END,
-                    CASE WHEN full_text ILIKE '%elt%' THEN 'elt' END,
-                    CASE WHEN full_text ILIKE '%etl%' THEN 'etl' END,
-                    CASE WHEN full_text ILIKE ANY (ARRAY['%data modeling%', '%modélisation%']) THEN 'data modeling' END,
-                    CASE WHEN full_text ILIKE '%talend%' THEN 'talend' END,
-                    CASE WHEN full_text ILIKE '%informatica%' THEN 'informatica' END,
-                    CASE WHEN full_text ILIKE '%ssis%' THEN 'ssis' END,
-                    CASE WHEN full_text ILIKE '%data warehouse%' THEN 'data warehouse' END,
-                    CASE WHEN full_text ILIKE '%datamart%' THEN 'datamart' END,
-                    CASE WHEN full_text ILIKE '%postgresql%' THEN 'postgresql' END,
-                    CASE WHEN full_text ILIKE '%mysql%' THEN 'mysql' END,
-                    CASE WHEN full_text ILIKE '%sql server%' THEN 'sql server' END,
-                    CASE WHEN full_text ILIKE '%oracle%' THEN 'oracle' END,
-                    CASE WHEN full_text ILIKE '%mongodb%' THEN 'mongodb' END
-                ]) AS unnested
-            ) AS subquery WHERE unnested IS NOT NULL
-        ) AS data_modelization
-
-    FROM renamed_and_cast AS r
-    LEFT JOIN annual_salary AS a ON r.job_id = a.job_id
-),
-
-final AS (
-    SELECT
-        *,
-
-        -- Categorize job titles into an array of all matches, using English keywords
-        ARRAY(
-            SELECT unnested FROM (
-                SELECT UNNEST(ARRAY[
-                    CASE WHEN lower(title) ILIKE ANY (ARRAY['%data scientist%', '%machine learning%', '%ml engineer%', '%ai engineer%', '%ia%', '%deep learning%']) THEN 'Data Scientist/AI' END,
-                    CASE WHEN lower(title) ILIKE ANY (ARRAY['%analytics engineer%', '%analytic engineer%']) THEN 'Analytics Engineer' END,
-                    CASE WHEN lower(title) ILIKE ANY (ARRAY['%data engineer%', '%data ops%', '%mlops%', '%devops%', '%sre%', '%etl%']) THEN 'Data Engineer/Platform' END,
-                    CASE WHEN lower(title) ILIKE ANY (ARRAY['%bi%', '%décisionnel%', '%business intelligence%']) THEN 'BI/Decision Support Specialist' END,
-                    CASE WHEN lower(title) ILIKE ANY (ARRAY['%business analyst%', '%functional analyst%']) THEN 'Business/Functional Analyst' END,
-                    CASE WHEN lower(title) ILIKE ANY (ARRAY['%data analyst%', '%analyste de données%']) THEN 'Data Analyst' END
+                    CASE WHEN lower(r.title) ILIKE ANY (ARRAY['%data scientist%', '%machine learning%']) THEN 'Data Scientist/AI' END,
+                    CASE WHEN lower(r.title) ILIKE ANY (ARRAY['%analytics engineer%']) THEN 'Analytics Engineer' END,
+                    CASE WHEN lower(r.title) ILIKE ANY (ARRAY['%data engineer%', '%data ops%']) THEN 'Data Engineer/Platform' END,
+                    CASE WHEN lower(r.title) ILIKE ANY (ARRAY['%bi%', '%décisionnel%']) THEN 'BI/Decision Support Specialist' END,
+                    CASE WHEN lower(r.title) ILIKE ANY (ARRAY['%business analyst%']) THEN 'Business/Functional Analyst' END,
+                    CASE WHEN lower(r.title) ILIKE ANY (ARRAY['%data analyst%']) THEN 'Data Analyst' END
                 ]) AS unnested
             ) AS subquery WHERE unnested IS NOT NULL
         ) AS work_titles,
-
-        -- Categorize seniority, translating French keywords
+        -- Categorize seniority (this logic remains the same)
         CASE
-            WHEN lower(title) ILIKE ANY (ARRAY['%stage%', '%stagiaire%', '%internship%', '%apprenti%', '%alternance%']) THEN 'Intern/Apprentice'
-            WHEN lower(title) ILIKE ANY (ARRAY['%senior%', '%confirmé%', '%expert%', '%principal%']) THEN 'Senior/Expert'
-            WHEN lower(title) ILIKE ANY (ARRAY['%lead%', '%head of%', '%responsable%', '%manager%', '%directeur%']) THEN 'Lead/Manager'
-            WHEN lower(title) ILIKE '%junior%' THEN 'Junior'
+            WHEN lower(r.title) ILIKE ANY (ARRAY['%stage%', '%internship%', '%alternance%']) THEN 'Intern/Apprentice'
+            WHEN lower(r.title) ILIKE ANY (ARRAY['%senior%', '%expert%']) THEN 'Senior/Expert'
+            WHEN lower(r.title) ILIKE ANY (ARRAY['%lead%', '%manager%', '%directeur%']) THEN 'Lead/Manager'
+            WHEN lower(r.title) ILIKE '%junior%' THEN 'Junior'
             ELSE 'Not specified'
         END AS seniority_category
-
-    FROM keywords_extracted
+    FROM
+        renamed_and_cast AS r
+    LEFT JOIN
+        annual_salary AS a ON r.job_id = a.job_id
+    LEFT JOIN
+        aggregated_skills AS agg_skills ON r.job_id = agg_skills.job_id
 )
 
 SELECT 
-    -- Select all columns from the final CTE
+    -- Select all columns from the final_enrichments CTE
     *,
     -- Add a final check to ensure the categorized work_titles array is never empty
     CASE 
         WHEN ARRAY_LENGTH(work_titles, 1) IS NULL THEN ARRAY['Other']
         ELSE work_titles 
     END AS work_titles_final
-FROM final
+FROM final_enrichments

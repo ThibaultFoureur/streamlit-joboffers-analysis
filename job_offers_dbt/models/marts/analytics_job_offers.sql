@@ -24,10 +24,7 @@ final as (
         schedule_type,
         posted_at,
         seniority_category,
-        languages,
-        bi_tools,
-        cloud_platforms,
-        data_modelization,
+        found_skills,
 
         -- Final business logic for consulting status
         CASE

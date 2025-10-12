@@ -93,13 +93,13 @@ def main():
     # --- Data Loading (Simplified) ---
     @st.cache_data
     def load_data_from_supabase():
-        """Loads the final, clean data."""
+        """Loads the final, clean data from the analytics table."""
         print("Loading data from Supabase...")
         response = conn.client.table("analytics_job_offers").select("*").execute()
         df = pd.DataFrame(response.data)
-        for col in ['languages', 'bi_tools', 'cloud_platforms', 'data_modelization', 'work_titles_final']:
-            if col in df.columns:
-                df[col] = df[col].apply(lambda x: x if isinstance(x, list) else [])
+        if 'found_skills' in df.columns:
+            # Ensure it's treated as a dictionary, replacing None with an empty dict
+            df['found_skills'] = df['found_skills'].apply(lambda x: x if isinstance(x, dict) else {})
         return df
 
     # --- Match Score Calculation ---
@@ -108,10 +108,16 @@ def main():
         if any(title in row['work_titles_final'] for title in profile.get('target_roles', [])):
             score += 10
         
-        all_job_skills = set(row.get('languages', []) + row.get('bi_tools', []) + row.get('cloud_platforms', []) + row.get('data_modelization', []))
-        for skill in profile.get('my_skills', []):
-            if skill in all_job_skills:
-                score += 3
+        if 'found_skills' in row and isinstance(row['found_skills'], dict):
+            # 1. Flatten all found skills for the current job into a single set
+            all_job_skills = set()
+            for category_skills in row['found_skills'].values():
+                all_job_skills.update(category_skills)
+
+            # 2. Check if any of the user's preferred skills are in that set
+            for skill in profile.get('my_skills', []):
+                if skill in all_job_skills:
+                    score += 3
 
         job_info = {row.get('seniority_category'), row.get('consulting_status'), row.get('schedule_type')}
         if profile.get('all_job_info') and not job_info.isdisjoint(profile.get('all_job_info', [])):
@@ -196,6 +202,24 @@ def main():
         response = conn.client.table("user_search_presets").select("id, preset_name, search_scores").eq("user_id", user_id).execute()
         return response.data
     
+    @st.cache_data(ttl=300)
+    def load_anonymous_filter_preset():
+        """Fetches the default filter preset for anonymous users."""
+        anon_id = st.secrets["ANONYMOUS_USER_ID"]
+        response = conn.client.table("user_filter_presets").select("filters").eq("user_id", anon_id).single().execute()
+        if response.data:
+            return response.data.get("filters")
+        return None
+
+    @st.cache_data(ttl=300)
+    def load_anonymous_search_preset():
+        """Fetches the default search profile for anonymous users."""
+        anon_id = st.secrets["ANONYMOUS_USER_ID"]
+        response = conn.client.table("user_search_presets").select("search_scores").eq("user_id", anon_id).single().execute()
+        if response.data:
+            return response.data.get("search_scores")
+        return None
+    
     # --- Initial Data Load ---
     try:
         source_df = load_data_from_supabase()
@@ -264,18 +288,16 @@ def main():
         'titles': [], 'category': 'All categories', 'sector': 'All sectors',
         'category_company': [],
     }
-    PRESET_DEFAULT = {
-        'consulting': 'Internal position', 'schedule': 'Full-time', 'seniority_category': ["Senior/Expert", "Not specified"],
-        'titles': ["BI/Decision Support Specialist", "Analytics Engineer", "Business/Functional Analyst", "Data Analyst"],
-        'category_company': ['Large Enterprise', 'Intermediate-sized Enterprise'], 'sector': 'All sectors', 'company': 'All companies'
-    }
 
     if st.session_state.active_filter_preset:
         # A logged-in user has an active preset
         current_values = st.session_state.active_filter_preset
     elif 'user' not in st.session_state and st.session_state.get('preset_active'):
         # Anonymous user has the default preset toggled
-        current_values = PRESET_DEFAULT
+        # Fetch the default preset from the database
+        anonymous_preset = load_anonymous_filter_preset()
+        # Use the fetched preset if it exists, otherwise fall back to empty defaults
+        current_values = anonymous_preset if anonymous_preset else DEFAULTS
     else:
         # No preset is active
         current_values = DEFAULTS
@@ -370,13 +392,37 @@ def main():
     if st.session_state.page == 'Skills Summary':
         st.title("📊 Market Skills Summary")
         st.write(f"Analysis of **{len(df_display)}** filtered job offers.")
-        st.header("Most In-Demand Technical Skills")
-        plot_top_keywords_plotly(df_display, 'bi_tools', title="Top BI Tools / Technical Solutions")
-        st.markdown("---") 
-        plot_top_keywords_plotly(df_display, 'languages', title="Top Technical Languages")
-        st.markdown("---") 
-        plot_top_keywords_plotly(df_display, 'cloud_platforms', title="Top Cloud & Data Platforms")
-        st.markdown("---") 
+        st.header("Most In-Demand Skills")
+        
+        #1. Aggregate all skills from the 'found_skills' column into a temporary DataFrame
+        all_skills_list = []
+        for index, row in df_display.iterrows():
+            for category, skills in row['found_skills'].items():
+                for skill in skills:
+                    all_skills_list.append({'category': category.replace('_', ' ').title(), 'skill': skill})
+        
+        if not all_skills_list:
+            st.info("No technical skills were found in the selected job offers.")
+        else:
+            skills_df = pd.DataFrame(all_skills_list)
+            
+            # 2. Get a sorted list of unique categories
+            unique_categories = sorted(skills_df['category'].unique())
+
+            # 3. Loop through categories and create a plot for each one
+            for category in unique_categories:
+                category_skills = skills_df[skills_df['category'] == category]
+                
+                # Use a dummy DataFrame for plotting since plot_value_counts_plotly expects one
+                # The function simply counts the values in the specified column
+                plot_value_counts_plotly(
+                    category_skills,
+                    'skill',
+                    top_n=10,
+                    title=f"Top {category}"
+                )
+                st.markdown("---")
+
     elif st.session_state.page == 'Job Offer Breakdown':
         st.title("📄 Job Offer Breakdown")
         st.write(f"Analysis of **{len(df_display)}** filtered job offers.")
@@ -443,23 +489,25 @@ def main():
 
             # --- Logic to Determine Which Profile to Apply ---
             PROFILE_DEFAULTS = { "my_skills": [], "target_roles": [], "all_job_info": [], "all_company_info": [], "min_salary": None }
-            PROFILE_DEFAULT = { "my_skills": ["python", "sql", "tableau", "excel", "looker", "gcp", "dbt"], "target_roles": ["Data Analyst", "Analytics Engineer"], "all_job_info": ["Senior/Expert", "Not specified", "Internal position", "Full-time"], "all_company_info": ['Large Enterprise', 'Intermediate-sized Enterprise'], "min_salary": 55000 }
 
             if st.session_state.active_search_preset:
                 current_profile_values = st.session_state.active_search_preset
             elif 'user' not in st.session_state and st.session_state.get('profile_preset_active'):
-                current_profile_values = PROFILE_DEFAULT
+                # Anonymous user has the default preset toggled
+                # Fetch the default preset from the database
+                anonymous_profile = load_anonymous_search_preset()
+                # Use the fetched preset if it exists, otherwise fall back to empty defaults
+                current_values = anonymous_profile if anonymous_profile else DEFAULTS
             else:
                 current_profile_values = PROFILE_DEFAULTS
 
-            combined_skills = (
-                source_df.explode('languages')['languages'].dropna().tolist() +
-                source_df.explode('bi_tools')['bi_tools'].dropna().tolist() +
-                source_df.explode('cloud_platforms')['cloud_platforms'].dropna().tolist() +
-                source_df.explode('data_modelization')['data_modelization'].dropna().tolist()
-            )
-            all_skills = sorted(list(set(combined_skills)))
-            if "Not specified" in all_skills: 
+            combined_skills = set()
+            for skills_dict in source_df['found_skills']:
+                for skill_list in skills_dict.values():
+                    combined_skills.update(skill_list)
+
+            all_skills = sorted(list(combined_skills))
+            if "Not specified" in all_skills:
                 all_skills.remove("Not specified")
 
             all_work_titles = sorted(source_df.explode('work_titles_final')['work_titles_final'].dropna().unique().tolist())
