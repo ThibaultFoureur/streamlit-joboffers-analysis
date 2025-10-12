@@ -497,7 +497,7 @@ def main():
                 # Fetch the default preset from the database
                 anonymous_profile = load_anonymous_search_preset()
                 # Use the fetched preset if it exists, otherwise fall back to empty defaults
-                current_values = anonymous_profile if anonymous_profile else DEFAULTS
+                current_profile_values = anonymous_profile if anonymous_profile else DEFAULTS
             else:
                 current_profile_values = PROFILE_DEFAULTS
 
@@ -720,10 +720,42 @@ def main():
                 
                 submitted = st.form_submit_button("Save Entire Configuration")
 
-            # --- Handle form submission (remains the same) ---
             if submitted:
-                # ... (your existing submission logic)
-                pass
+                # 1. Process the raw text inputs into clean lists
+                queries_list = [q.strip() for q in queries_text.split(',') if q.strip()]
+                
+                # 2. Dynamically build the skills JSON from session state
+                skills_payload = {}
+                for category, skills_string in st.session_state.skill_categories.items():
+                    # Split the comma-separated string into a list of skills
+                    cleaned_skills = [s.strip() for s in skills_string.split(',') if s.strip()]
+                    
+                    # Only add the category if it contains actual skills
+                    if cleaned_skills:
+                        # Normalize the category name for consistency (e.g., "BI Tools" -> "bi_tools")
+                        db_category_key = category.lower().replace(" ", "_")
+                        skills_payload[db_category_key] = cleaned_skills
+
+                # 3. Validate that essential fields are not empty
+                if not queries_list or not location_text.strip():
+                    st.error("Job Titles and Location cannot be empty.")
+                else:
+                    # 4. Assemble the final data payload for Supabase
+                    config_data = {
+                        "user_id": user_id,
+                        "search_queries": queries_list,
+                        "search_location": location_text.strip(),
+                        "search_skills": skills_payload, # The new dynamic JSONB payload
+                        "updated_at": "now()" # Tell Supabase to set the current timestamp
+                    }
+                    
+                    # 5. Save the data to the database using 'upsert'
+                    try:
+                        conn.client.table("user_configs").upsert(config_data).execute()
+                        st.success("Configuration saved successfully!")
+                        st.balloons()
+                    except Exception as e:
+                        st.error(f"Failed to save configuration: {e}")
 
         else:
             password = st.text_input("Enter Superuser Password", type="password")
