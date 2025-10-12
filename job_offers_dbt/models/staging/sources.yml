@@ -6,4 +6,6 @@ sources:
     tables:
       - name: raw_jobs
       - name: raw_companies
+      - name: user_configs
+        description: "Stores search configurations for superusers, including skill keywords."
       
