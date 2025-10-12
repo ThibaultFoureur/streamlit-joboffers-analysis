@@ -206,7 +206,7 @@ def main():
     def load_anonymous_filter_preset():
         """Fetches the default filter preset for anonymous users."""
         anon_id = st.secrets["ANONYMOUS_USER_ID"]
-        response = conn.client.table("user_filter_presets").select("filters").eq("user_id", anon_id).single().execute()
+        response = conn.client.table("user_filter_presets").select("filters").eq("user_id", anon_id).maybe_single().execute()
         if response.data:
             return response.data.get("filters")
         return None
@@ -215,7 +215,7 @@ def main():
     def load_anonymous_search_preset():
         """Fetches the default search profile for anonymous users."""
         anon_id = st.secrets["ANONYMOUS_USER_ID"]
-        response = conn.client.table("user_search_presets").select("search_scores").eq("user_id", anon_id).single().execute()
+        response = conn.client.table("user_search_presets").select("search_scores").eq("user_id", anon_id).maybe_single().execute()
         if response.data:
             return response.data.get("search_scores")
         return None
