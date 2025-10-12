@@ -202,6 +202,24 @@ def main():
         response = conn.client.table("user_search_presets").select("id, preset_name, search_scores").eq("user_id", user_id).execute()
         return response.data
     
+    @st.cache_data(ttl=300)
+    def load_anonymous_filter_preset():
+        """Fetches the default filter preset for anonymous users."""
+        anon_id = st.secrets["ANONYMOUS_USER_ID"]
+        response = conn.client.table("user_filter_presets").select("filters").eq("user_id", anon_id).single().execute()
+        if response.data:
+            return response.data.get("filters")
+        return None
+
+    @st.cache_data(ttl=300)
+    def load_anonymous_search_preset():
+        """Fetches the default search profile for anonymous users."""
+        anon_id = st.secrets["ANONYMOUS_USER_ID"]
+        response = conn.client.table("user_search_presets").select("search_scores").eq("user_id", anon_id).single().execute()
+        if response.data:
+            return response.data.get("search_scores")
+        return None
+    
     # --- Initial Data Load ---
     try:
         source_df = load_data_from_supabase()
@@ -270,18 +288,16 @@ def main():
         'titles': [], 'category': 'All categories', 'sector': 'All sectors',
         'category_company': [],
     }
-    PRESET_DEFAULT = {
-        'consulting': 'Internal position', 'schedule': 'Full-time', 'seniority_category': ["Senior/Expert", "Not specified"],
-        'titles': ["BI/Decision Support Specialist", "Analytics Engineer", "Business/Functional Analyst", "Data Analyst"],
-        'category_company': ['Large Enterprise', 'Intermediate-sized Enterprise'], 'sector': 'All sectors', 'company': 'All companies'
-    }
 
     if st.session_state.active_filter_preset:
         # A logged-in user has an active preset
         current_values = st.session_state.active_filter_preset
     elif 'user' not in st.session_state and st.session_state.get('preset_active'):
         # Anonymous user has the default preset toggled
-        current_values = PRESET_DEFAULT
+        # Fetch the default preset from the database
+        anonymous_preset = load_anonymous_filter_preset()
+        # Use the fetched preset if it exists, otherwise fall back to empty defaults
+        current_values = anonymous_preset if anonymous_preset else DEFAULTS
     else:
         # No preset is active
         current_values = DEFAULTS
@@ -473,12 +489,15 @@ def main():
 
             # --- Logic to Determine Which Profile to Apply ---
             PROFILE_DEFAULTS = { "my_skills": [], "target_roles": [], "all_job_info": [], "all_company_info": [], "min_salary": None }
-            PROFILE_DEFAULT = { "my_skills": ["python", "sql", "tableau", "excel", "looker", "gcp", "dbt"], "target_roles": ["Data Analyst", "Analytics Engineer"], "all_job_info": ["Senior/Expert", "Not specified", "Internal position", "Full-time"], "all_company_info": ['Large Enterprise', 'Intermediate-sized Enterprise'], "min_salary": 55000 }
 
             if st.session_state.active_search_preset:
                 current_profile_values = st.session_state.active_search_preset
             elif 'user' not in st.session_state and st.session_state.get('profile_preset_active'):
-                current_profile_values = PROFILE_DEFAULT
+                # Anonymous user has the default preset toggled
+                # Fetch the default preset from the database
+                anonymous_profile = load_anonymous_search_preset()
+                # Use the fetched preset if it exists, otherwise fall back to empty defaults
+                current_values = anonymous_profile if anonymous_profile else DEFAULTS
             else:
                 current_profile_values = PROFILE_DEFAULTS
 
