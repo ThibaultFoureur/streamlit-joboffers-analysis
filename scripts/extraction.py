@@ -8,7 +8,7 @@ import requests
 import re
 
 # --- CONSTANTS ---
-MAX_PAGES_PER_QUERY = 8
+MAX_PAGES_PER_QUERY = 1
 
 # --- SERVICE CONNECTIONS ---
 load_dotenv()
@@ -105,56 +105,97 @@ def get_company_info(company_name: str) -> dict:
 if __name__ == "__main__":
     
     # =========================================================================
-    # PART 1: FETCH AND LOAD NEW JOB OFFERS
+    # PART 1: FETCH AND LOAD NEW JOB OFFERS BASED ON USER CONFIGS
     # =========================================================================
     print("🚀 Starting Part 1: Fetching New Job Offers")
     
+    # UPDATED: Fetch all user search configurations from Supabase
+    print("Fetching user search configurations...")
     try:
-        response = supabase.table('raw_jobs').select('job_id').execute()
-        existing_job_ids = {item['job_id'] for item in response.data}
-        print(f"Found {len(existing_job_ids)} existing job IDs in 'raw_jobs'.")
+        configs_response = supabase.table("user_configs").select("user_id, search_queries, search_location").execute()
+        search_configs = configs_response.data
+        if not search_configs:
+            print("⏹️ No active user configurations found. Exiting job search.")
+            # We still proceed to the company enrichment part
+        else:
+            print(f"Found {len(search_configs)} configurations to process.")
     except Exception as e:
-        print(f"⚠️ Could not fetch existing job IDs, will proceed without it. Error: {e}")
-        existing_job_ids = set()
+        print(f"❌ Error fetching user configurations: {e}")
+        search_configs = [] # Ensure the script can continue to company enrichment
 
-    search_queries = [
-    '"Analytics Engineer" paris',
-    '"BI Analyst" paris',
-    '"Data Analyst Power BI" paris',
-    '"Ingénieur BI" paris',
-    '"Data Analyst" paris',
-    '"Analyste décisionnel" paris',
-    '"Business Analyst" paris',
-    '"Développeur BI" paris',
-    '"Analyste de données" paris',
-    ]
     all_new_jobs_to_load = []
+    all_new_job_user_links = [] # UPDATED: List to store user-job relationships
 
-    for query in search_queries:
-        jobs_from_api = fetch_raw_jobs_paginated(query, MAX_PAGES_PER_QUERY)
-        if not jobs_from_api: continue
+    if search_configs:
+        try:
+            response = supabase.table('raw_jobs').select('job_id').execute()
+            existing_job_ids = {item['job_id'] for item in response.data}
+            print(f"Found {len(existing_job_ids)} existing job IDs in 'raw_jobs'.")
+        except Exception as e:
+            print(f"⚠️ Could not fetch existing job IDs. Error: {e}")
+            existing_job_ids = set()
 
-        df = pd.DataFrame(jobs_from_api)
-        df.drop_duplicates(subset=['job_id'], keep='first', inplace=True)
-        new_jobs_df = df[~df['job_id'].isin(existing_job_ids)]
-        
-        print(f"  ✨ Found {len(new_jobs_df)} truly new jobs for query '{query}'.")
-        all_new_jobs_to_load.extend(new_jobs_df.to_dict(orient='records'))
-        print("-" * 40)
+        # UPDATED: Loop through each user's configuration
+        for config in search_configs:
+            user_id = config['user_id']
+            location = config['search_location']
+            job_titles = config.get('search_queries', [])
+            
+            if not all([user_id, location, job_titles]):
+                print(f"⚠️ Skipping config due to missing data: {config}")
+                continue
 
+            print(f"\nProcessing config for user: {user_id}")
+
+            # UPDATED: Loop through the job titles for the current user
+            for title in job_titles:
+                # UPDATED: Dynamically build the query string
+                query = f'"{title}" {location}'
+                
+                jobs_from_api = fetch_raw_jobs_paginated(query, MAX_PAGES_PER_QUERY)
+                if not jobs_from_api: continue
+
+                df = pd.DataFrame(jobs_from_api)
+                if 'job_id' not in df.columns: continue
+                df.drop_duplicates(subset=['job_id'], keep='first', inplace=True)
+
+                # 1. Identify jobs whose *details* we haven't stored yet
+                new_jobs_details_df = df[~df['job_id'].isin(existing_job_ids)]
+                if not new_jobs_details_df.empty:
+                    print(f"  ✨ Found {len(new_jobs_details_df)} new job *details* for query '{query}'.")
+                    all_new_jobs_to_load.extend(new_jobs_details_df.to_dict(orient='records'))
+                    # Add the newly found job IDs to our set to avoid re-adding them from another query
+                    existing_job_ids.update(new_jobs_details_df['job_id'])
+
+                # 2. Create the user-job links for *all* jobs found by this query
+                for job_id in df['job_id']:
+                    all_new_job_user_links.append({"user_id": user_id, "job_id": job_id})
+
+            print("-" * 40)
+
+    # UPDATED: Load job details first, then the links
     if not all_new_jobs_to_load:
-        print("✅ No new job offers to add. Skipping to Part 2.")
+        print("✅ No new job details to add.")
     else:
-        raw_jobs_df = pd.DataFrame(all_new_jobs_to_load)
-        raw_jobs_df.drop_duplicates(subset=['job_id'], keep='first', inplace=True)
-        
-        print(f"\nUpserting {len(raw_jobs_df)} new and unique job offers into 'raw_jobs' table...")
+        raw_jobs_df = pd.DataFrame(all_new_jobs_to_load).drop_duplicates(subset=['job_id'])
+        print(f"\nUpserting {len(raw_jobs_df)} new and unique job details into 'raw_jobs' table...")
         raw_jobs_df = raw_jobs_df.astype(object).where(pd.notnull(raw_jobs_df), None)
         try:
             supabase.table('raw_jobs').upsert(raw_jobs_df.to_dict(orient='records')).execute()
-            print("✅ Part 1 Load successful!")
+            print("✅ Job details load successful!")
         except Exception as e:
             print(f"❌ Error during 'raw_jobs' load: {e}")
+    
+    if not all_new_job_user_links:
+        print("✅ No new user-job links to create.")
+    else:
+        links_df = pd.DataFrame(all_new_job_user_links).drop_duplicates()
+        print(f"Upserting {len(links_df)} user-job links into 'raw_job_user_links'...")
+        try:
+            supabase.table('raw_job_user_links').upsert(links_df.to_dict(orient='records')).execute()
+            print("✅ User-job links load successful!")
+        except Exception as e:
+            print(f"❌ Error during 'raw_job_user_links' load: {e}")
 
     # =========================================================================
     # PART 2: FETCH AND LOAD NEW COMPANY INFORMATION

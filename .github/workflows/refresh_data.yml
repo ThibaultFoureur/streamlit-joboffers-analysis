@@ -6,7 +6,7 @@ on:
 
   # Schedules the workflow to run every day at 2 AM (UTC)
   schedule:
-    - cron: '0 2 * * *'
+    - cron: '0 2 * * SUN'
 
 jobs:
   build-and-refresh:
