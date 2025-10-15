@@ -22,22 +22,8 @@ def main():
     else:
         base_url = "http://lvh.me:8501"
 
-    # --- PKCE: Step 3 - Exchange the code for a session ---
-    if "code" in query_params and "pkce_verifier" in query_params:
-        auth_code = query_params["code"]
-        pkce_verifier = query_params["pkce_verifier"]
-        
-        try:
-            session = conn.auth.exchange_code_for_session({
-                "auth_code": auth_code,
-                "code_verifier": pkce_verifier,
-            })
-            # Redirect to the base URL to clear the query parameters
-            st.markdown(f'<meta http-equiv="refresh" content="0; url={base_url}">', unsafe_allow_html=True)
-            st.stop()
-        except Exception as e:
-            st.error(f"Error during code exchange: {e}")
-            st.stop()
+    st.sidebar.header("User Account")
+    session = conn.auth.get_session()
 
     # --- Disclaimer and info to the sidebar ---
     st.sidebar.info(
@@ -56,36 +42,25 @@ def main():
         # Clear user info if not logged in
         if 'user' in st.session_state:
             del st.session_state['user']
+
         if st.sidebar.button("Login with Google", type="primary"):
             
-            pkce_verifier = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b'=').decode('utf-8')
-            pkce_challenge = base64.urlsafe_b64encode(hashlib.sha256(pkce_verifier.encode('utf-8')).digest()).rstrip(b'=').decode('utf-8')
-
-            redirect_url_with_verifier = f"{base_url}?pkce_verifier={pkce_verifier}"
-
-            supabase_url = conn.client.supabase_url
-            
-            params = {
-                "provider": "google",
-                "redirect_to": redirect_url_with_verifier,
-                "code_challenge": pkce_challenge,
-                "code_challenge_method": "S256"
-            }
-            auth_url = f"{supabase_url}/auth/v1/authorize?{urlencode(params)}"
-            
+            auth_url = conn.auth.sign_in_with_oauth(
+                provider="google",
+                redirect_to=base_url # This tells Supabase where to send the user AFTER login
+            )
             st.markdown(f'<meta http-equiv="refresh" content="0; url={auth_url}">', unsafe_allow_html=True)
             st.stop()
 
     else:
         # Store user object in session state
         st.session_state['user'] = session.user 
-        
         user_email = st.session_state['user'].email
         st.sidebar.write("Logged in as:")
         st.sidebar.markdown(f"**{user_email}**")
+        
         if st.sidebar.button("Logout"):
             conn.auth.sign_out()
-            # Clear the user from session state on logout
             if 'user' in st.session_state:
                 del st.session_state['user']
             st.rerun()
