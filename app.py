@@ -37,9 +37,12 @@ def main():
 
         if st.sidebar.button("Login with Google", type="primary"):
             # Use the library's built-in function with the correct syntax
-            auth_response = conn.auth.sign_in_with_oauth(
-                {"provider": "google", "redirect_to": base_url}, # Provider is the first positional argument
-            )
+            auth_response = conn.auth.sign_in_with_oauth({
+                "provider": "google",
+                "options": {
+                    "redirect_to": base_url
+                }
+            })
             # The URL is an attribute of the response object
             st.markdown(f'<meta http-equiv="refresh" content="0; url={auth_response.url}">', unsafe_allow_html=True)
             st.stop()
