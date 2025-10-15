@@ -12,22 +12,6 @@ def main():
     conn = st.connection("supabase", type=SupabaseConnection)
     query_params = st.query_params
 
-    # The URL will contain a "?code=..." parameter. We need to catch this.
-    if "code" in st.query_params:
-        try:
-            # Exchange the authorization code for a session
-            code = st.query_params["code"]
-            conn.auth.exchange_code_for_session({"auth_code": code})
-            # Use a meta refresh to remove the code from the URL and trigger a clean rerun
-            st.markdown(
-                '<meta http-equiv="refresh" content="0;URL=https://app-joboffers-analysis.streamlit.app/">',
-                unsafe_allow_html=True,
-            )
-            st.stop()
-        except Exception as e:
-            st.error(f"An error occurred during authentication: {e}")
-            st.stop()
-
     # Determine the base URL based on the environment ---
     if os.environ.get("APP_ENV") == "production":
         base_url = "https://app-joboffers-analysis.streamlit.app"
@@ -46,10 +30,6 @@ def main():
         """
     )
 
-    # --- Sidebar for Optional User Login ---
-    st.sidebar.header("User Account")
-    session = conn.auth.get_session()
-
     if not session:
         # Clear user info if not logged in
         if 'user' in st.session_state:
@@ -65,14 +45,16 @@ def main():
             st.stop()
 
     else:
-        # --- LOGOUT UI ---
-        user_email = session.user.email
+        # Store user object in session state
+        st.session_state['user'] = session.user 
+        user_email = st.session_state['user'].email
         st.sidebar.write("Logged in as:")
         st.sidebar.markdown(f"**{user_email}**")
         
         if st.sidebar.button("Logout"):
             conn.auth.sign_out()
-            # The rerun will now correctly show the "Login" button
+            if 'user' in st.session_state:
+                del st.session_state['user']
             st.rerun()
 
     # --- Data Loading (Simplified) ---
