@@ -3,20 +3,12 @@ import pandas as pd
 import plotly.express as px
 from st_supabase_connection import SupabaseConnection
 from datetime import date
-import os
 
 st.set_page_config(layout="wide")
 
 # --- Main Application Logic ---
 def main():
     conn = st.connection("supabase", type=SupabaseConnection)
-    query_params = st.query_params
-
-    # Determine the base URL based on the environment ---
-    if os.environ.get("APP_ENV") == "production":
-        base_url = "https://app-joboffers-analysis.streamlit.app"
-    else:
-        base_url = "http://lvh.me:8501"
 
     st.sidebar.header("User Account")
     session = conn.auth.get_session()
@@ -27,37 +19,50 @@ def main():
         **About this Project:**
         - For questions, contact [t.foureur@gmail.com](mailto:t.foureur@gmail.com).
         - Explore the code on [GitHub](https://github.com/DEFAULTFoureur/streamlit-joboffers-analysis).
+        - Login to save your own search presets or to create a new job search
         """
     )
 
     if not session:
-        # Clear user info if not logged in
-        if 'user' in st.session_state:
-            del st.session_state['user']
+        # --- Formulaires de Connexion et d'Inscription ---
+        with st.sidebar.expander("Login / Sign Up"):
+            email = st.text_input("Email")
+            password = st.text_input("Password", type="password")
 
-        if st.sidebar.button("Login with Google", type="primary"):
-            # Use the library's built-in function with the correct syntax
-            auth_response = conn.auth.sign_in_with_oauth({
-                "provider": "google",
-                "options": {
-                    "redirect_to": base_url
-                }
-            })
-            # The URL is an attribute of the response object
-            st.markdown(f'<meta http-equiv="refresh" content="0; url={auth_response.url}">', unsafe_allow_html=True)
-            st.stop()
+            col1, col2 = st.columns(2)
 
+            with col1:
+                if st.button("Login", use_container_width=True):
+                    try:
+                        # Tente de connecter l'utilisateur
+                        conn.auth.sign_in_with_password({
+                            "email": email,
+                            "password": password,
+                        })
+                        st.rerun() # Rafraîchit la page pour montrer l'état connecté
+                    except Exception as e:
+                        st.error("Invalid login credentials.")
+
+            with col2:
+                if st.button("Sign Up", use_container_width=True):
+                    try:
+                        # Tente d'inscrire un nouvel utilisateur
+                        conn.auth.sign_up({
+                            "email": email,
+                            "password": password,
+                        })
+                        st.info("Sign up successful! Please check your email to confirm your account.")
+                    except Exception as e:
+                        st.error(f"Sign up failed: {e}")
+    
     else:
-        # Store user object in session state
-        st.session_state['user'] = session.user 
-        user_email = st.session_state['user'].email
+        # --- Interface pour l'utilisateur connecté ---
+        user_email = session.user.email
         st.sidebar.write("Logged in as:")
         st.sidebar.markdown(f"**{user_email}**")
         
         if st.sidebar.button("Logout"):
             conn.auth.sign_out()
-            if 'user' in st.session_state:
-                del st.session_state['user']
             st.rerun()
 
     # --- Data Loading (Simplified) ---
@@ -215,7 +220,7 @@ def main():
         st.session_state.page = 'Skills Summary'
     if st.sidebar.button("Raw Data & Matching", key="nav_data"):
         st.session_state.page = 'Raw Data & Matching'
-    if 'user' in st.session_state:
+    if session:
         if st.sidebar.button("RESTRICTED - Configure new search", key="nav_superuser"):
             st.session_state.page = 'Superuser'
 
@@ -223,8 +228,8 @@ def main():
     st.sidebar.header("Filters")
 
     # --- Preset Loading and Selection Logic ---
-    if 'user' in st.session_state:
-        user_id = st.session_state['user'].id
+    if session:
+        user_id = session.user.id # UPDATED: Get user_id from session
         filter_presets = load_filter_presets(user_id)
 
         if len(filter_presets) == 1:
@@ -262,7 +267,7 @@ def main():
     if st.session_state.active_filter_preset:
         # A logged-in user has an active preset
         current_values = st.session_state.active_filter_preset
-    elif 'user' not in st.session_state and st.session_state.get('preset_active'):
+    elif not session and st.session_state.get('preset_active'):
         # Anonymous user has the default preset toggled
         # Fetch the default preset from the database
         anonymous_preset = load_anonymous_filter_preset()
@@ -307,13 +312,13 @@ def main():
         )
 
     # This section now runs AFTER the variables above have been created.
-    if 'user' in st.session_state:
+    if session:
         st.sidebar.subheader("Saving a new Preset")
         preset_name = st.sidebar.text_input("Enter preset name to save")
 
         if st.sidebar.button("Save Current Filters"):
             if preset_name:
-                user_id = st.session_state['user'].id
+                user_id = session.user.id
                 
                 current_filters_payload = {
                     "consulting": selected_is_consulting,
@@ -434,8 +439,8 @@ def main():
         
         with st.expander("Configure my search profile and match score"):
             # --- Search Profile Preset Loading Logic ---
-            if 'user' in st.session_state:
-                user_id = st.session_state['user'].id
+            if session:
+                user_id = session.user.id
                 search_presets = load_search_presets(user_id)
 
                 if len(search_presets) == 1:
@@ -462,7 +467,7 @@ def main():
 
             if st.session_state.active_search_preset:
                 current_profile_values = st.session_state.active_search_preset
-            elif 'user' not in st.session_state and st.session_state.get('profile_preset_active'):
+            elif not session and st.session_state.get('profile_preset_active'):
                 # Anonymous user has the default preset toggled
                 # Fetch the default preset from the database
                 anonymous_profile = load_anonymous_search_preset()
@@ -504,12 +509,12 @@ def main():
             )
 
             # --- NEW: Save Search Profile button ---
-            if 'user' in st.session_state:
+            if session:
                 st.markdown("---")
                 profile_preset_name = st.text_input("Enter profile name to save")
                 if st.button("Save Current Search Profile"):
                     if profile_preset_name:
-                        user_id = st.session_state['user'].id
+                        user_id = session.user.id
 
                         # The profile data is already in st.session_state.profile
                         profile_payload = st.session_state.profile
@@ -627,7 +632,7 @@ def main():
         if st.session_state.superuser_access:
             st.success("Access Granted!")
             
-            user_id = st.session_state['user'].id
+            user_id = session.user.id
             
             # --- NEW: Define the callback function ---
             def add_category_callback():
