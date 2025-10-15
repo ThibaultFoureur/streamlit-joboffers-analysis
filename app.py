@@ -3,11 +3,7 @@ import pandas as pd
 import plotly.express as px
 from st_supabase_connection import SupabaseConnection
 from datetime import date
-from urllib.parse import urlencode
-import json
 import os
-import hashlib
-import base64
 
 st.set_page_config(layout="wide")
 
@@ -15,6 +11,22 @@ st.set_page_config(layout="wide")
 def main():
     conn = st.connection("supabase", type=SupabaseConnection)
     query_params = st.query_params
+
+    # The URL will contain a "?code=..." parameter. We need to catch this.
+    if "code" in st.query_params:
+        try:
+            # Exchange the authorization code for a session
+            code = st.query_params["code"]
+            conn.auth.exchange_code_for_session({"auth_code": code})
+            # Use a meta refresh to remove the code from the URL and trigger a clean rerun
+            st.markdown(
+                '<meta http-equiv="refresh" content="0;URL=https://app-joboffers-analysis.streamlit.app/">',
+                unsafe_allow_html=True,
+            )
+            st.stop()
+        except Exception as e:
+            st.error(f"An error occurred during authentication: {e}")
+            st.stop()
 
     # Determine the base URL based on the environment ---
     if os.environ.get("APP_ENV") == "production":
@@ -53,16 +65,14 @@ def main():
             st.stop()
 
     else:
-        # Store user object in session state
-        st.session_state['user'] = session.user 
-        user_email = st.session_state['user'].email
+        # --- LOGOUT UI ---
+        user_email = session.user.email
         st.sidebar.write("Logged in as:")
         st.sidebar.markdown(f"**{user_email}**")
         
         if st.sidebar.button("Logout"):
             conn.auth.sign_out()
-            if 'user' in st.session_state:
-                del st.session_state['user']
+            # The rerun will now correctly show the "Login" button
             st.rerun()
 
     # --- Data Loading (Simplified) ---
