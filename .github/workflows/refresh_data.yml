@@ -1,4 +1,4 @@
-name: Daily Job Offer and Companies Data Refresh
+name: Job Offer and Companies Data Refresh
 
 on:
   # Allows you to run this workflow manually from the GitHub Actions tab

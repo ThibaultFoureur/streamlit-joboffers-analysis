@@ -670,7 +670,7 @@ def main():
 
                 return config_data
 
-            def trigger_github_action():
+            def trigger_github_action(run_mode: str, max_pages: str = "5"):
                 owner = st.secrets["GITHUB_OWNER"]
                 repo = st.secrets["GITHUB_REPO"]
                 workflow = st.secrets["WORKFLOW_NAME"]
@@ -753,7 +753,6 @@ def main():
                         key=f"skill_input_{category}",
                         placeholder="English,French,Arabic,Spanish"
                     )
-                
                 # --- Conditional Submit Buttons ---
                 if not existing_config:
                     # Case 1: No config exists yet, so only a simple save button is needed.
@@ -787,7 +786,7 @@ def main():
                             run_mode = "dbt_only"
                             api_response = trigger_github_action(run_mode="dbt_only") 
                             if api_response.status_code == 204:
-                                st.success("Configuration updated and analysis pipeline (dbt only) started!")
+                                st.success("Configuration updated and analysis pipeline (dbt only) started! Indicators should be updated in a few minutes")
                                 st.balloons()
                             else:
                                 st.error(f"Failed to start pipeline: {api_response.text}")
