@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import requests
 from st_supabase_connection import SupabaseConnection
 from datetime import date
 
@@ -631,10 +632,69 @@ def main():
 
         if st.session_state.superuser_access:
             st.success("Access Granted!")
-            
             user_id = session.user.id
+
+            # --- Initialize session state for the confirmation flow ---
+            if 'confirming_new_search' not in st.session_state:
+                st.session_state.confirming_new_search = False
+            if 'new_config_data' not in st.session_state:
+                st.session_state.new_config_data = None
+
+            def process_and_validate_form(user_id, queries_text, location_text, skill_categories):
+                """Processes form inputs, validates them, and returns the data payload for Supabase."""
+                
+                # 1. Process the raw text inputs into clean lists
+                queries_list = [q.strip() for q in queries_text.split(',') if q.strip()]
+                
+                # 2. Dynamically build the skills JSON from session state
+                skills_payload = {}
+                for category, skills_string in skill_categories.items():
+                    cleaned_skills = [s.strip() for s in skills_string.split(',') if s.strip()]
+                    if cleaned_skills:
+                        db_category_key = category.lower().replace(" ", "_")
+                        skills_payload[db_category_key] = cleaned_skills
+
+                # 3. Validate that essential fields are not empty
+                if not queries_list or not location_text.strip():
+                    st.error("Job Titles and Location cannot be empty.")
+                    return None  # Return None to indicate failure
+
+                # 4. Assemble and return the final data payload
+                config_data = {
+                    "user_id": user_id,
+                    "search_queries": queries_list,
+                    "search_location": location_text.strip(),
+                    "search_skills": skills_payload,
+                    "updated_at": "now()"
+                }
+
+                return config_data
+
+            def trigger_github_action():
+                owner = st.secrets["GITHUB_OWNER"]
+                repo = st.secrets["GITHUB_REPO"]
+                workflow = st.secrets["WORKFLOW_NAME"]
+                token = st.secrets["GITHUB_TOKEN"]
+
+                url = f"https://api.github.com/repos/{owner}/{repo}/actions/workflows/{workflow}/dispatches"
+                
+                headers = {
+                    "Accept": "application/vnd.github.v3+json",
+                    "Authorization": f"Bearer {token}",
+                }
+
+                data = {
+                    "ref": "main", # Or your primary branch name
+                    "inputs": {
+                        "max_pages": "5",  # The value must be a string
+                        "run_mode": run_mode
+                    }
+                }
+                
+                response = requests.post(url, headers=headers, json=data)
+                
+                return response
             
-            # --- NEW: Define the callback function ---
             def add_category_callback():
                 # Get the value from the text input's state
                 new_name = st.session_state.new_skill_category_name
@@ -669,12 +729,13 @@ def main():
                     if st.button(f"❌", key=f"delete_btn_{category}", help=f"Delete '{category}'"):
                         del st.session_state.skill_categories[category]
                         st.rerun()
+            
+            # --- Fetch existing config to determine which buttons to show ---
+            existing_config = conn.client.table("user_configs").select("*").eq("user_id", user_id).execute().data
+            config_data = None
 
             # --- The form for ENTERING data ---
             with st.form("config_form"):
-                # ... (The rest of your form code remains exactly the same)
-                # Fetch existing config for non-skill fields
-                existing_config = conn.client.table("user_configs").select("search_queries, search_location").eq("user_id", user_id).execute().data
                 default_queries = "\n".join(existing_config[0]['search_queries']) if existing_config else ""
                 default_location = existing_config[0]['search_location'] if existing_config else ""
 
@@ -693,44 +754,95 @@ def main():
                         placeholder="English,French,Arabic,Spanish"
                     )
                 
-                submitted = st.form_submit_button("Save Entire Configuration")
-
-            if submitted:
-                # 1. Process the raw text inputs into clean lists
-                queries_list = [q.strip() for q in queries_text.split(',') if q.strip()]
-                
-                # 2. Dynamically build the skills JSON from session state
-                skills_payload = {}
-                for category, skills_string in st.session_state.skill_categories.items():
-                    # Split the comma-separated string into a list of skills
-                    cleaned_skills = [s.strip() for s in skills_string.split(',') if s.strip()]
-                    
-                    # Only add the category if it contains actual skills
-                    if cleaned_skills:
-                        # Normalize the category name for consistency (e.g., "BI Tools" -> "bi_tools")
-                        db_category_key = category.lower().replace(" ", "_")
-                        skills_payload[db_category_key] = cleaned_skills
-
-                # 3. Validate that essential fields are not empty
-                if not queries_list or not location_text.strip():
-                    st.error("Job Titles and Location cannot be empty.")
+                # --- Conditional Submit Buttons ---
+                if not existing_config:
+                    # Case 1: No config exists yet, so only a simple save button is needed.
+                    submitted_save = st.form_submit_button("Save Configuration")
                 else:
-                    # 4. Assemble the final data payload for Supabase
-                    config_data = {
-                        "user_id": user_id,
-                        "search_queries": queries_list,
-                        "search_location": location_text.strip(),
-                        "search_skills": skills_payload, # The new dynamic JSONB payload
-                        "updated_at": "now()" # Tell Supabase to set the current timestamp
-                    }
-                    
-                    # 5. Save the data to the database using 'upsert'
+                    # Case 2: Config exists, show two distinct options.
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        submitted_update = st.form_submit_button("Update Search", type="secondary")
+                    with col2:
+                        submitted_new_search = st.form_submit_button("Start New Search (Deletes Old Result)", type="primary")
+            # Logic for a brand new configuration save
+            if 'submitted_save' in locals() and submitted_save:
+                config_data = process_and_validate_form(user_id, queries_text, location_text, st.session_state.skill_categories)
+                if config_data:
                     try:
                         conn.client.table("user_configs").upsert(config_data).execute()
                         st.success("Configuration saved successfully!")
+                        st.rerun() # Rerun to show the new button options
                         st.balloons()
                     except Exception as e:
                         st.error(f"Failed to save configuration: {e}")
+
+            # Logic for "Update Only"
+            if 'submitted_update' in locals() and submitted_update:
+                config_data = process_and_validate_form(user_id, queries_text, location_text, st.session_state.skill_categories)
+                if config_data:
+                    try:
+                        with st.spinner("Saving configuration and triggering analysis..."):
+                            conn.client.table("user_configs").upsert(config_data).execute()
+                            run_mode = "dbt_only"
+                            api_response = trigger_github_action(run_mode="dbt_only") 
+                            if api_response.status_code == 204:
+                                st.success("Configuration updated and analysis pipeline (dbt only) started!")
+                                st.balloons()
+                            else:
+                                st.error(f"Failed to start pipeline: {api_response.text}")
+                    except Exception as e:
+                        st.error(f"An error occurred: {e}")
+
+            # Logic for "Start New Search"
+            if 'submitted_new_search' in locals() and submitted_new_search:
+                config_data = process_and_validate_form(user_id, queries_text, location_text, st.session_state.skill_categories)
+                if config_data:
+                    # Store the processed data and set the confirmation flag
+                    st.session_state.new_config_data = config_data
+                    st.session_state.confirming_new_search = True
+                    # Rerun to show the confirmation message
+                    st.rerun()
+
+            if st.session_state.confirming_new_search:
+                st.warning("⚠️ **ARE YOU SURE?**")
+                st.write("This will permanently delete all of your existing job links before starting a completely new search.")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    # If confirmed, proceed with the destructive actions
+                    if st.button("Yes, delete links and start new search", type="primary"):
+                        config_data = st.session_state.new_config_data
+                        try:
+                            with st.spinner("Deleting old job links..."):
+                                conn.client.table("raw_job_user_links").delete().eq("user_id", user_id).execute()
+                            
+                            with st.spinner("Saving new configuration and triggering full pipeline..."):
+                                conn.client.table("user_configs").upsert(config_data).execute()
+                                run_mode = "full_run"
+                                api_response = trigger_github_action(run_mode="full_run")
+                                
+                                if api_response.status_code == 204:
+                                    st.success("New search started successfully! Old links have been deleted.")
+                                    st.balloons()
+                                else:
+                                    st.error(f"Failed to start pipeline: {api_response.text}")
+
+                        except Exception as e:
+                            st.error(f"An error occurred: {e}")
+                        
+                        # Reset the confirmation state
+                        st.session_state.confirming_new_search = False
+                        st.session_state.new_config_data = None
+                        # Use st.rerun() to clear the confirmation message
+                        st.rerun()
+
+                with col2:
+                    # If cancelled, just reset the state
+                    if st.button("Cancel"):
+                        st.session_state.confirming_new_search = False
+                        st.session_state.new_config_data = None
+                        st.rerun()
 
         else:
             password = st.text_input("Enter Superuser Password", type="password")

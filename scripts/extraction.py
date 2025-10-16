@@ -8,7 +8,7 @@ import requests
 import re
 
 # --- CONSTANTS ---
-MAX_PAGES_PER_QUERY = 1
+MAX_PAGES_PER_QUERY = int(os.environ.get('MAX_PAGES_PER_QUERY', '1'))
 
 # --- SERVICE CONNECTIONS ---
 load_dotenv()

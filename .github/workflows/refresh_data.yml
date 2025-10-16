@@ -3,6 +3,15 @@ name: Daily Job Offer and Companies Data Refresh
 on:
   # Allows you to run this workflow manually from the GitHub Actions tab
   workflow_dispatch:
+    inputs:
+      max_pages:
+        description: 'Max pages to scrape per query'
+        required: true
+        default: '5' # The default for a manual run is 5
+      run_mode:
+        description: "'full_run' (extract + dbt) or 'dbt_only' (just dbt)"
+        required: true
+        default: 'full_run'
 
   # Schedules the workflow to run every day at 2 AM (UTC)
   schedule:
