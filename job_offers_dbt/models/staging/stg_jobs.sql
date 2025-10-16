@@ -107,14 +107,19 @@ annual_salary AS (
 all_user_skills AS (
     SELECT
         config.user_id,
-        all_skills.category,
-        LOWER(skills.keyword) AS keyword
+        category_skills.category,
+        -- This is the final, clean English name we want to keep
+        alias_skills.canonical_name,
+        -- This is the specific French or English term we will search for
+        LOWER(skills.search_alias) AS keyword
     FROM
         user_configs AS config,
-        -- This unnests the JSONB object into key/value pairs (e.g., 'languages', '["python", "sql"]')
-        LATERAL jsonb_each_text(config.search_skills) AS all_skills(category, keywords_json_array)
-        -- This unnests the JSON array into individual text values (e.g., 'python', 'sql')
-        , LATERAL jsonb_array_elements_text(all_skills.keywords_json_array::jsonb) AS skills(keyword)
+        -- 1. Unnest top-level categories (e.g., 'soft_skills')
+        LATERAL jsonb_each(config.search_skills) AS category_skills(category, skill_objects)
+        -- 2. Unnest canonical names and their alias arrays (e.g., 'organization', '["organization", "organisation"]')
+        , LATERAL jsonb_each(category_skills.skill_objects) AS alias_skills(canonical_name, alias_array)
+        -- 3. Unnest the alias array into individual search terms (e.g., 'organization', 'organisation')
+        , LATERAL jsonb_array_elements_text(alias_skills.alias_array) AS skills(search_alias)
 ),
 
 matched_skills AS (

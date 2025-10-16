@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import requests
+from google import genai
+import json
 from st_supabase_connection import SupabaseConnection
 from datetime import date
 
@@ -640,35 +642,43 @@ def main():
             if 'new_config_data' not in st.session_state:
                 st.session_state.new_config_data = None
 
-            def process_and_validate_form(user_id, queries_text, location_text, skill_categories):
-                """Processes form inputs, validates them, and returns the data payload for Supabase."""
+            def process_and_validate_form(user_id, queries, location, skill_config_data):
+                """Reads from the UI widgets' state, validates, and saves to Supabase."""
+                queries_list = [q.strip() for q in queries.splitlines() if q.strip()]
                 
-                # 1. Process the raw text inputs into clean lists
-                queries_list = [q.strip() for q in queries_text.split(',') if q.strip()]
-                
-                # 2. Dynamically build the skills JSON from session state
+                # Re-parse the text areas back into the nested JSON format
                 skills_payload = {}
-                for category, skills_string in skill_categories.items():
-                    cleaned_skills = [s.strip() for s in skills_string.split(',') if s.strip()]
-                    if cleaned_skills:
-                        db_category_key = category.lower().replace(" ", "_")
-                        skills_payload[db_category_key] = cleaned_skills
+                for category in skill_config_data:
+                    db_category_key = category.lower().replace(" ", "_")
+                    skills_payload[db_category_key] = {}
+                    # Read the value from the text area's unique key
+                    skills_string = st.session_state[f"skill_input_{category}"]
+                    
+                    skill_groups = [group.strip() for group in skills_string.split('\n') if group.strip()]
+                    for group in skill_groups:
+                        aliases = [alias.strip() for alias in group.split(',') if alias.strip()]
+                        if aliases:
+                            canonical_name = aliases[0]
+                            skills_payload[db_category_key][canonical_name] = aliases
 
-                # 3. Validate that essential fields are not empty
-                if not queries_list or not location_text.strip():
+                if not queries_list or not location.strip():
                     st.error("Job Titles and Location cannot be empty.")
-                    return None  # Return None to indicate failure
+                    return False # Indicate failure
 
-                # 4. Assemble and return the final data payload
                 config_data = {
                     "user_id": user_id,
                     "search_queries": queries_list,
-                    "search_location": location_text.strip(),
+                    "search_location": location.strip(),
                     "search_skills": skills_payload,
                     "updated_at": "now()"
                 }
-
-                return config_data
+                
+                try:
+                    conn.client.table("user_configs").upsert(config_data).execute()
+                    return True # Indicate success
+                except Exception as e:
+                    st.error(f"Failed to save configuration: {e}")
+                    return False
 
             def trigger_github_action(run_mode: str, max_pages: str = "5"):
                 owner = st.secrets["GITHUB_OWNER"]
@@ -696,77 +706,170 @@ def main():
                 return response
             
             def add_category_callback():
-                # Get the value from the text input's state
-                new_name = st.session_state.new_skill_category_name
-                if new_name and new_name not in st.session_state.skill_categories:
-                    # Add the new category to our skills dictionary
-                    st.session_state.skill_categories[new_name] = ""
-                    # NOW it's safe to clear the input's state for the next rerun
+                # 1. Get the new category name from the text input's state and clean it.
+                new_name = st.session_state.get("new_skill_category_name", "").strip()
+
+                if new_name:
+                    # 2. Normalize the name to create a database-friendly key.
+                    #    (e.g., "My New Category" becomes "my_new_category")
+                    db_key = new_name.lower().replace(" ", "_")
+
+                    # 3. Check if this key doesn't already exist in our source of truth.
+                    if db_key not in st.session_state.skill_config_data:
+                        
+                        # 4. THE FIX: Add the new category with an empty dictionary as its value. ✅
+                        st.session_state.skill_config_data[db_key] = {}
+                    
+                    # 5. Clear the text input for the next entry.
                     st.session_state.new_skill_category_name = ""
 
-            # Initialize session state for skills if it doesn't exist
-            if 'skill_categories' not in st.session_state:
-                existing_config = conn.client.table("user_configs").select("search_skills").eq("user_id", user_id).execute().data
-                if existing_config and existing_config[0].get("search_skills"):
-                    skills_from_db = existing_config[0]["search_skills"]
-                    st.session_state.skill_categories = {k: ", ".join(v) for k, v in skills_from_db.items()}
-                else:
-                    st.session_state.skill_categories = {}
+            def suggest_skills_with_gemini(job_titles: str):
+                """Calls the Gemini API to suggest skills based on job titles."""
+                try:
+                    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
-            st.subheader("Skill Keywords")
+                    # --- The Prompt ---
+                    # This prompt is engineered to return a clean JSON object.
+                    # It uses your provided example as a guide for the model.
+                    prompt = f"""
+                    You are an expert technical recruiter helping to configure a job search pipeline for the **French job market**.
+                    Based on the following list of job titles, generate a JSON object of relevant hard and soft skills.
 
-            # --- UI for MANAGING skill categories (OUTSIDE the form) ---
-            st.text_input("New Skill Category Name", key="new_skill_category_name", placeholder="Languages")
-            # UPDATED: Use the on_click parameter to call our function
+                    **CRITICAL INSTRUCTIONS:**
+                    1. The final JSON object must have keys for skill categories (e.g., "soft_skills", "administrative_management").
+                    2. For each category, the value must be another JSON object.
+                    3. In this inner object, the **key must be the skill's name in English** (e.g., "project management").
+                    4. The **value must be an array of search terms in both French and English** that correspond to that skill.
+
+                    Here is an example of the desired output format for "Assistante de direction":
+                    ```json
+                    {{
+                    "office_suite": {{
+                        "microsoft office": ["microsoft office", "pack office", "office suite"],
+                        "excel": ["excel", "tableur"]
+                    }},
+                    "administrative_management": {{
+                        "calendar management": ["calendar management", "gestion d'agenda"],
+                        "travel arrangements": ["travel arrangements", "organisation de déplacements"]
+                    }},
+                    "soft_skills": {{
+                        "organization": ["organization", "organisation"],
+                        "proactivity": ["proactivity", "proactivité", "prise d'initiative"]
+                    }}
+                    }}
+                    ```
+
+                    Now, generate the JSON for this list of job titles:
+                    ---
+                    {job_titles}
+                    ---
+                    """
+
+                    # 2. Call the generate_content method, passing the model and contents
+                    response = client.models.generate_content(
+                        model="gemini-2.5-flash", # Specify the model here
+                        contents=prompt
+                    )
+                    
+                    # 3. Clean and parse the response (this logic remains the same)
+                    cleaned_text = response.text.strip().lstrip("```json").rstrip("```")
+                    suggested_skills = json.loads(cleaned_text)
+                    return suggested_skills
+
+                except json.JSONDecodeError:
+                    st.error("The AI returned an invalid format. Please try again.")
+                    return None
+                except Exception as e:
+                    st.error(f"An error occurred while contacting the AI model: {e}")
+                    return None
+
+            # --- Initialize session state for skills ---
+            if 'skill_config_data' not in st.session_state:
+                with st.spinner("Loading existing skill configuration..."):
+                    existing_config = conn.client.table("user_configs").select("search_skills").eq("user_id", user_id).single().execute()
+                    if existing_config.data and existing_config.data.get("search_skills"):
+                        st.session_state.skill_config_data = existing_config.data["search_skills"]
+                    else:
+                        st.session_state.skill_config_data = {}
+
+            # --- STEP 1: Main Search Parameters (Outside Form) ---
+            st.subheader("1. Define Search Parameters")
+            existing_config = conn.client.table("user_configs").select("search_queries, search_location").eq("user_id", user_id).execute().data
+            default_queries = "\n".join(existing_config[0]['search_queries']) if existing_config else ""
+            default_location = existing_config[0]['search_location'] if existing_config else ""
+
+            st.text_area("Job Titles / Keywords (one per line)", value=default_queries, key="queries_input")
+            st.text_input("Location (e.g., city, country)", value=default_location, key="location_input")
+
+            # --- STEP 2: Generate or Manually Add Skill Categories (Outside Form) ---
+            st.subheader("2. Define Skill Categories")
+            
+            # AI Suggestion Button
+            if st.button("✨ Suggest Skill Categories with AI"):
+                if st.session_state.queries_input:
+                    with st.spinner("🧠 The AI is thinking..."):
+                        suggested_skills = suggest_skills_with_gemini(st.session_state.queries_input)
+                        if suggested_skills:
+                            # Directly assign the nested JSON to our source of truth
+                            st.session_state.skill_config_data = suggested_skills
+                            st.success("Skills suggested and populated in the form below!")
+                            st.rerun()
+
+            # Manual Category Management
+            with st.expander("All skills in raw JSON format"):
+                st.write(st.session_state.skill_config_data)
+            st.text_input("Or, add a new skill category manually:", key="new_skill_category_name", placeholder="e.g., Certifications")
             st.button("Add Category", on_click=add_category_callback)
 
-            # Display delete buttons for existing categories
-            for category in list(st.session_state.skill_categories.keys()):
-                col1, col2 = st.columns([4, 1])
-                with col1:
-                    st.markdown(f"**{category}**")
-                with col2:
-                    if st.button(f"❌", key=f"delete_btn_{category}", help=f"Delete '{category}'"):
-                        del st.session_state.skill_categories[category]
-                        st.rerun()
-            
-            # --- Fetch existing config to determine which buttons to show ---
-            existing_config = conn.client.table("user_configs").select("*").eq("user_id", user_id).execute().data
-            config_data = None
-
-            # --- The form for ENTERING data ---
+            # --- STEP 3: Review and Edit Skills in the Form ---
             with st.form("config_form"):
-                default_queries = "\n".join(existing_config[0]['search_queries']) if existing_config else ""
-                default_location = existing_config[0]['search_location'] if existing_config else ""
+                st.subheader("3. Review, Edit, and Save")
+                
+                # Display an input for each skill category
+                if not st.session_state.skill_config_data:
+                    st.info("No skill categories defined. Add some manually or use the AI suggestion button above.")
+                else:
+                    # We iterate over a copy of the keys to allow deletion during the loop
+                    for category in list(st.session_state.skill_config_data.keys()):
+                        # Create columns for the text area and the delete button
+                        col1, col2 = st.columns([10, 1])
 
-                st.subheader("Search Parameters")
-                queries_text = st.text_area("Job Titles / Keywords (comma separated)", value=default_queries, height=150,
-                                            placeholder="Analytics Engineer,BI Analyst")
-                location_text = st.text_input("One location (e.g., city, country)", value=default_location,
-                                              placeholder="Paris")
+                        with col1:
+                            # Format the nested data from our "source of truth" into the display string
+                            skills_object = st.session_state.skill_config_data[category]
+                            display_groups = []
+                            for english_name, alias_list in skills_object.items():
+                                display_groups.append(", ".join(alias_list))
+                            display_string = "\n".join(display_groups)
 
-                st.subheader("Skill Values")
-                for category in st.session_state.skill_categories:
-                    st.session_state.skill_categories[category] = st.text_area(
-                        label=f"{category} (comma-separated)",
-                        value=st.session_state.skill_categories[category],
-                        key=f"skill_input_{category}",
-                        placeholder="English,French,Arabic,Spanish"
-                    )
+                            # The text area is for editing the formatted string
+                            st.text_area(
+                                label=f"**{category.replace('_', ' ').title()}** (one skill per line. First value will be used in analysis then aliases separated by `,`)",
+                                value=display_string,
+                                key=f"skill_input_{category}" # Unique key for reading the edited value later
+                            )
+                        
+                        with col2:
+                            st.write("&#8203;") # Small spacer for vertical alignment
+                            # The delete button removes the category from our source of truth
+                            if st.form_submit_button("❌", key=f"delete_btn_{category}", help=f"Delete '{category}'"):
+                                del st.session_state.skill_config_data[category]
+                                st.rerun()
+
+                st.markdown("---")
                 # --- Conditional Submit Buttons ---
                 if not existing_config:
-                    # Case 1: No config exists yet, so only a simple save button is needed.
                     submitted_save = st.form_submit_button("Save Configuration")
                 else:
-                    # Case 2: Config exists, show two distinct options.
                     col1, col2 = st.columns(2)
                     with col1:
                         submitted_update = st.form_submit_button("Update Search", type="secondary")
                     with col2:
                         submitted_new_search = st.form_submit_button("Start New Search (Deletes Old Result)", type="primary")
+                        
             # Logic for a brand new configuration save
             if 'submitted_save' in locals() and submitted_save:
-                config_data = process_and_validate_form(user_id, queries_text, location_text, st.session_state.skill_categories)
+                config_data = process_and_validate_form(user_id, st.session_state.queries_input, st.session_state.location_input, st.session_state.skill_config_data)
                 if config_data:
                     try:
                         conn.client.table("user_configs").upsert(config_data).execute()
@@ -778,12 +881,11 @@ def main():
 
             # Logic for "Update Only"
             if 'submitted_update' in locals() and submitted_update:
-                config_data = process_and_validate_form(user_id, queries_text, location_text, st.session_state.skill_categories)
+                config_data = process_and_validate_form(user_id, st.session_state.queries_input, st.session_state.location_input, st.session_state.skill_config_data)
                 if config_data:
                     try:
                         with st.spinner("Saving configuration and triggering analysis..."):
                             conn.client.table("user_configs").upsert(config_data).execute()
-                            run_mode = "dbt_only"
                             api_response = trigger_github_action(run_mode="dbt_only") 
                             if api_response.status_code == 204:
                                 st.success("Configuration updated and analysis pipeline (dbt only) started! Indicators should be updated in a few minutes")
@@ -795,7 +897,7 @@ def main():
 
             # Logic for "Start New Search"
             if 'submitted_new_search' in locals() and submitted_new_search:
-                config_data = process_and_validate_form(user_id, queries_text, location_text, st.session_state.skill_categories)
+                config_data = process_and_validate_form(user_id, st.session_state.queries_input, st.session_state.location_input, st.session_state.skill_config_data)
                 if config_data:
                     # Store the processed data and set the confirmation flag
                     st.session_state.new_config_data = config_data
@@ -818,7 +920,6 @@ def main():
                             
                             with st.spinner("Saving new configuration and triggering full pipeline..."):
                                 conn.client.table("user_configs").upsert(config_data).execute()
-                                run_mode = "full_run"
                                 api_response = trigger_github_action(run_mode="full_run")
                                 
                                 if api_response.status_code == 204:
