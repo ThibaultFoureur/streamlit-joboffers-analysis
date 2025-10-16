@@ -7,3 +7,4 @@ supabase
 python-dotenv
 serpapi
 google-search-results
+google-genai
