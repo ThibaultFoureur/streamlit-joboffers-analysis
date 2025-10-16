@@ -198,6 +198,19 @@ def main():
             return response.data.get("search_scores")
         return None
     
+    @st.cache_data(ttl=300)
+    def load_user_skill_config(user_id):
+        """Fetches the search_skills JSON object for a specific user."""
+        if not user_id:
+            return {}
+        
+        response = conn.client.table("user_configs").select("search_skills").eq("user_id", user_id).single().execute()
+        
+        if response.data and response.data.get("search_skills"):
+            return response.data["search_skills"]
+        
+        return {}
+    
     # --- Initial Data Load ---
     try:
         source_df = load_data_from_supabase()
@@ -371,35 +384,46 @@ def main():
         st.title("📊 Market Skills Summary")
         st.write(f"Analysis of **{len(df_display)}** filtered job offers.")
         st.header("Most In-Demand Skills")
+
+        # 1. Determine the current user's ID (either logged-in or anonymous)
+        if session:
+            current_user_id = session.user.id
+        else:
+            current_user_id = st.secrets.get("ANONYMOUS_USER_ID")
+
+        # 2. Fetch the current user's skill configuration and get their categories
+        user_skill_config = load_user_skill_config(current_user_id)
+        user_relevant_categories = user_skill_config.keys() # e.g., ['soft_skills', 'data_visualization_reporting']
         
-        #1. Aggregate all skills from the 'found_skills' column into a temporary DataFrame
+        # 3. Aggregate all skills from the 'found_skills' column (this part is the same)
         all_skills_list = []
         for index, row in df_display.iterrows():
             for category, skills in row['found_skills'].items():
                 for skill in skills:
-                    all_skills_list.append({'category': category.replace('_', ' ').title(), 'skill': skill})
+                    # The category here is the database format (e.g., 'soft_skills')
+                    all_skills_list.append({'category': category, 'skill': skill})
         
         if not all_skills_list:
             st.info("No technical skills were found in the selected job offers.")
         else:
             skills_df = pd.DataFrame(all_skills_list)
             
-            # 2. Get a sorted list of unique categories
-            unique_categories = sorted(skills_df['category'].unique())
-
-            # 3. Loop through categories and create a plot for each one
-            for category in unique_categories:
-                category_skills = skills_df[skills_df['category'] == category]
+            # 4. Loop through the USER'S categories and create a plot for each one
+            for db_category in sorted(user_relevant_categories):
+                # Filter the DataFrame for skills matching the user's category
+                category_skills = skills_df[skills_df['category'] == db_category]
                 
-                # Use a dummy DataFrame for plotting since plot_value_counts_plotly expects one
-                # The function simply counts the values in the specified column
-                plot_value_counts_plotly(
-                    category_skills,
-                    'skill',
-                    top_n=10,
-                    title=f"Top {category}"
-                )
-                st.markdown("---")
+                if not category_skills.empty:
+                    # Create a user-friendly title (e.g., 'soft_skills' -> 'Top Soft Skills')
+                    display_title = f"Top {db_category.replace('_', ' ').title()}"
+
+                    plot_value_counts_plotly(
+                        df_to_plot=category_skills,
+                        column_name='skill',
+                        top_n=10,
+                        title=display_title
+                    )
+                    st.markdown("---")
 
     elif st.session_state.page == 'Job Offer Breakdown':
         st.title("📄 Job Offer Breakdown")

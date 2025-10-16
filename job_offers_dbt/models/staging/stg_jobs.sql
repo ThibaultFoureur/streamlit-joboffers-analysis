@@ -126,7 +126,7 @@ matched_skills AS (
     SELECT
         jobs.job_id,
         skills.category,
-        skills.keyword
+        skills.canonical_name AS skill_name
     FROM
         renamed_and_cast AS jobs
     LEFT JOIN
@@ -155,7 +155,7 @@ aggregated_skills AS (
         SELECT
             job_id,
             category,
-            jsonb_agg(DISTINCT keyword) AS keyword_array
+            jsonb_agg(DISTINCT skill_name) AS keyword_array
         FROM
             matched_skills
         GROUP BY
