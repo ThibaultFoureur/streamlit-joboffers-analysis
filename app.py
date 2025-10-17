@@ -656,6 +656,9 @@ def main():
     elif st.session_state.page == 'Superuser':
         st.title("🔒 RESTRICTED - Configure Job Search")
 
+        # --- CONSTANT for the limit of job titles ---
+        MAX_JOB_TITLES = 10
+
         if st.session_state.superuser_access:
             st.success("Access Granted!")
             user_id = session.user.id
@@ -823,6 +826,17 @@ def main():
             default_location = existing_config[0]['search_location'] if existing_config else ""
 
             st.text_area("Job Titles / Keywords (one per line)", value=default_queries, key="queries_input")
+
+            # Count the number of non-empty lines in the text area's current state
+            job_titles_list = [line for line in st.session_state.queries_input.splitlines() if line.strip()]
+            num_job_titles = len(job_titles_list)
+
+            if num_job_titles > MAX_JOB_TITLES:
+                st.warning(
+                    f"⚠️ You have entered {num_job_titles} job titles. "
+                    f"Please limit your search to a maximum of {MAX_JOB_TITLES} to stay within API usage limits."
+                )
+
             st.text_input("Location (e.g., city, country)", value=default_location, key="location_input")
 
             # --- STEP 2: Generate or Manually Add Skill Categories (Outside Form) ---
