@@ -175,66 +175,57 @@ def main():
             fig = px.bar(keyword_counts, x=keyword_counts.values, y=keyword_counts.index, orientation='h', title=title,  labels={'x': "Number of offers", 'y': column_name}, text_auto=True)
             st.plotly_chart(fig, use_container_width=True)
 
-    def plot_value_counts_plotly(df_to_plot, column_name, top_n=10, title="", hover_column=None):
+    def plot_value_counts_plotly(df_to_plot, column_name, top_n=10, title="", extra_hover_data=None):
         """
-        Plots a bar chart of value counts for a specified column.
-        Optionally includes data from another column on hover.
+        Plots a bar chart of value counts.
+        Optionally includes extra data on hover, like aliases.
         """
         if df_to_plot.empty:
             st.warning(f"No data to display for '{title}'.")
             return
 
-        # --- NEW: Conditional logic for hover data ---
-        if hover_column:
-            # --- Logic for the complex "Overall Top Skills" chart ---
-            # 1. Count skill occurrences
-            value_counts = df_to_plot[column_name].value_counts().reset_index()
-            value_counts.columns = [column_name, 'count']
-
-            # 2. For each skill, aggregate the unique hover values into a string
-            hover_data = df_to_plot.groupby(column_name)[hover_column].unique().apply(', '.join).reset_index()
+        # --- Aggregation Logic ---
+        # 1. Get the counts for the main column
+        value_counts = df_to_plot[column_name].value_counts().reset_index()
+        value_counts.columns = [column_name, 'count']
+        
+        # 2. If extra hover data is requested, aggregate it
+        if extra_hover_data:
+            # For each value in column_name, get the first corresponding value from the hover columns
+            hover_agg_dict = {col: 'first' for col in extra_hover_data.values()}
+            hover_df = df_to_plot.groupby(column_name).agg(hover_agg_dict).reset_index()
             
-            # 3. Merge the counts and hover data
-            plot_df = pd.merge(value_counts, hover_data, on=column_name)
-            
-            # 4. Get the top N skills and sort for plotting
-            plot_df = plot_df.nlargest(top_n, 'count').sort_values(by='count')
-
-            # 5. Create the plot with hover_data
-            fig = px.bar(
-                plot_df,
-                x='count',
-                y=column_name,
-                orientation='h',
-                title=title,
-                text='count',
-                hover_data=[hover_column] # Pass the hover column to Plotly
-            )
-            
-            # Customize the hover label for clarity
-            fig.update_traces(
-                hovertemplate=f'<b>{column_name.title()}:</b> %{{y}}<br><b>Count:</b> %{{x}}<br><b>{hover_column.title()}:</b> %{{customdata[0]}}'
-            )
+            # Merge the counts with the hover data
+            plot_df = pd.merge(value_counts, hover_df, on=column_name)
         else:
-            # --- Original logic for simple value count charts ---
-            series_to_plot = df_to_plot[column_name].fillna('Not specified')
-            value_counts = series_to_plot.value_counts().nlargest(top_n).sort_values()
+            plot_df = value_counts
             
-            if value_counts.empty:
-                st.info(f"No data found for '{title}' in this selection.")
-                return
-                
-            fig = px.bar(
-                value_counts,
-                x=value_counts.values,
-                y=value_counts.index,
-                orientation='h',
-                title=title,
-                labels={'x': "Number of offers", 'y': column_name.replace('_', ' ').capitalize()},
-                text_auto=True
-            )
+        # 3. Get the top N results and sort for plotting
+        plot_df = plot_df.nlargest(top_n, 'count').sort_values(by='count')
 
-        # Common layout updates for both chart types
+        # --- Plotting Logic ---
+        hover_columns = list(extra_hover_data.values()) if extra_hover_data else []
+        
+        fig = px.bar(
+            plot_df,
+            x='count',
+            y=column_name,
+            orientation='h',
+            title=title,
+            text='count',
+            hover_data=hover_columns
+        )
+        
+        # --- Dynamic Hover Template ---
+        # Start with the basic template
+        hovertemplate = f"<b>{column_name.title()}:</b> %{{y}}<br><b>Count:</b> %{{x}}"
+        
+        # Add extra data fields to the template
+        if extra_hover_data:
+            for i, (label, col_name) in enumerate(extra_hover_data.items()):
+                hovertemplate += f"<br><b>{label}:</b> %{{customdata[{i}]}}"
+            
+        fig.update_traces(hovertemplate=hovertemplate)
         fig.update_layout(yaxis={'categoryorder':'total ascending'})
         st.plotly_chart(fig, use_container_width=True)
 
@@ -281,6 +272,25 @@ def main():
             return response.data["search_skills"]
         
         return {}
+    
+    @st.cache_data
+    def create_alias_lookup_df(skill_config):
+        """
+        Transforms the nested skill config JSON into a flat DataFrame for easy merging.
+        Columns: ['category', 'skill', 'aliases_string']
+        """
+        if not skill_config:
+            return pd.DataFrame(columns=['category', 'skill', 'aliases_string'])
+
+        lookup_list = []
+        for category, skills_object in skill_config.items():
+            for canonical_name, alias_list in skills_object.items():
+                lookup_list.append({
+                    "category": category,
+                    "skill": canonical_name,
+                    "aliases_string": ", ".join(alias_list)
+                })
+        return pd.DataFrame(lookup_list)
     
     # --- Initial Data Load ---
     try:
@@ -466,6 +476,7 @@ def main():
 
         # 2. Fetch the current user's skill configuration and get their categories
         user_skill_config = load_user_skill_config(current_user_id)
+        alias_lookup_df = create_alias_lookup_df(user_skill_config)
         user_relevant_categories = user_skill_config.keys() # e.g., ['soft_skills', 'data_visualization_reporting']
         
         # 3. Aggregate all skills from the 'found_skills' column (this part is the same)
@@ -481,38 +492,42 @@ def main():
         else:
             skills_df = pd.DataFrame(all_skills_list)
 
-            filtered_skills_df = skills_df[skills_df['category'].isin(user_relevant_categories)]
+            # 4. MERGE the found skills with their aliases
+            skills_with_aliases_df = pd.merge(skills_df, alias_lookup_df, on=['category', 'skill'], how='left')
 
-            # --- Display the combined chart for all skills ---
+            # 5. Filter the merged DataFrame to include only the user's relevant categories
+            filtered_skills_df = skills_with_aliases_df[skills_with_aliases_df['category'].isin(user_relevant_categories)]
+
+            # --- Display the combined chart with aliases on hover ---
             st.header("Overall Top Skills")
-            plot_value_counts_plotly(
-                df_to_plot=filtered_skills_df,
-                column_name='skill',
-                top_n=15,  # Show more skills in the combined view
-                title="Top 15 Most In-Demand Skills (All Categories)",
-                hover_column='category'
-            )
+            if filtered_skills_df.empty:
+                st.info("No skills matching your configuration were found in this selection.")
+            else:
+                plot_value_counts_plotly(
+                    df_to_plot=filtered_skills_df,
+                    column_name='skill',
+                    top_n=15,
+                    title="Top 15 Most In-Demand Skills (All Categories)",
+                    # Pass the extra hover data config
+                    extra_hover_data={"Aliases": "aliases_string"}
+                )
             st.markdown("---")
 
-            # --- Display the category-specific charts (existing logic) ---
+            # --- Display the category-specific charts with aliases on hover ---
             st.header("Top Skills by Category")
-
-            # 4. Loop through the USER'S categories and create a plot for each one
             for db_category in sorted(user_relevant_categories):
-                # Filter the DataFrame for skills matching the user's category
-                category_skills = skills_df[skills_df['category'] == db_category]
+                category_skills_df = filtered_skills_df[filtered_skills_df['category'] == db_category]
                 
-                if not category_skills.empty:
-                    # Create a user-friendly title (e.g., 'soft_skills' -> 'Top Soft Skills')
-                    display_title = f"Top {db_category.replace('_', ' ').title()}"
-
+                if not category_skills_df.empty:
+                    display_title = f"Top Skills in {db_category.replace('_', ' ').title()}"
                     plot_value_counts_plotly(
-                        df_to_plot=category_skills,
+                        df_to_plot=category_skills_df,
                         column_name='skill',
                         top_n=10,
-                        title=display_title
+                        title=display_title,
+                        # Pass the same extra hover data config here too
+                        extra_hover_data={"Aliases": "aliases_string"}
                     )
-                    st.markdown("---")
 
     elif st.session_state.page == 'Job Offer Breakdown':
         st.title("📄 Job Offer Breakdown")
