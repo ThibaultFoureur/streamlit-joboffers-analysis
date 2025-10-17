@@ -311,14 +311,14 @@ def main():
 
     # --- Page Navigation ---
     st.sidebar.header("Navigation")
-    if st.sidebar.button("Job Offer Breakdown", key="nav_breakdown"):
+    if st.sidebar.button("📄 Job Offer Breakdown", key="nav_breakdown"):
         st.session_state.page = 'Job Offer Breakdown'
-    if st.sidebar.button("Skills Summary", key="nav_skills"):
+    if st.sidebar.button("📊 Skills Summary", key="nav_skills"):
         st.session_state.page = 'Skills Summary'
-    if st.sidebar.button("Raw Data & Matching", key="nav_data"):
-        st.session_state.page = 'Raw Data & Matching'
-    if st.sidebar.button("Configure new search", key="nav_superuser"):
-        st.session_state.page = 'Superuser'
+    if st.sidebar.button("🔎 Explore Offers", key="nav_data"):
+        st.session_state.page = 'Explore offers'
+    if st.sidebar.button("⚙️ Configure new search", key="nav_superuser"):
+        st.session_state.page = 'Configure new search'
 
     # --- Sidebar Filters ---
     st.sidebar.header("Filters")
@@ -564,8 +564,8 @@ def main():
             plot_value_counts_plotly(df_display, 'activity_section_details', top_n=15, title="Top Activities")
         st.markdown("---") 
 
-    elif st.session_state.page == 'Raw Data & Matching':
-        st.title(" Explorer Offers by Relevance")
+    elif st.session_state.page == 'Explore offers':
+        st.title(" 🔎 Explore Offers by Relevance")
         
         with st.expander("Configure my search profile and match score"):
             # --- Search Profile Preset Loading Logic ---
@@ -758,8 +758,8 @@ def main():
             else:
                 st.warning("Please log in to save your progress.")
     
-    elif st.session_state.page == 'Superuser':
-        st.title(" Configure Job Search")
+    elif st.session_state.page == 'Configure new search':
+        st.title("⚙️ Configure new search")
 
         # --- CONSTANT for the limit of job titles ---
         MAX_JOB_TITLES = 10
