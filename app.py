@@ -42,6 +42,7 @@ def main():
                             "email": email,
                             "password": password,
                         })
+                        st.cache_data.clear()
                         st.rerun() # Rafraîchit la page pour montrer l'état connecté
                     except Exception as e:
                         st.error("Invalid login credentials.")
@@ -66,6 +67,7 @@ def main():
         
         if st.sidebar.button("Logout"):
             conn.auth.sign_out()
+            st.cache_data.clear()
             st.rerun()
 
     # --- Data Loading (Simplified) ---
@@ -168,13 +170,13 @@ def main():
             st.info(f"No data found for '{title}' in this selection.")
 
     # --- Helper functions to load presets ---
-    @st.cache_data(ttl=10)
+    @st.cache_data(ttl=300)
     def load_filter_presets(user_id):
         """Fetches all filter presets for a given user."""
         response = conn.client.table("user_filter_presets").select("id, preset_name, filters").eq("user_id", user_id).execute()
         return response.data
 
-    @st.cache_data(ttl=10)
+    @st.cache_data(ttl=300)
     def load_search_presets(user_id):
         """Fetches all search score presets for a given user."""
         response = conn.client.table("user_search_presets").select("id, preset_name, search_scores").eq("user_id", user_id).execute()
@@ -355,6 +357,8 @@ def main():
                 try:
                     conn.client.table("user_filter_presets").insert(record).execute()
                     st.sidebar.success(f"Preset '{preset_name}' saved!")
+                    st.cache_data.clear()
+                    st.rerun()
                 except Exception as e:
                     st.sidebar.error(f"Error saving preset: {e}")
             else:
@@ -555,6 +559,8 @@ def main():
                         try:
                             conn.client.table("user_search_presets").insert(record).execute()
                             st.success(f"Profile '{profile_preset_name}' saved!")
+                            st.cache_data.clear()
+                            st.rerun()
                         except Exception as e:
                             st.error(f"Error saving profile: {e}")
                     else:
