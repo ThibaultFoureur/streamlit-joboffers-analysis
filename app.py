@@ -508,7 +508,7 @@ def main():
                     top_n=15,
                     title="Top 15 Most In-Demand Skills (All Categories)",
                     # Pass the extra hover data config
-                    extra_hover_data={"Aliases": "aliases_string"}
+                    extra_hover_data={"Skill category": "category", "Aliases": "aliases_string"}
                 )
             st.markdown("---")
 
