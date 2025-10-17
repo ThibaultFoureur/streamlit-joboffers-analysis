@@ -27,42 +27,61 @@ def main():
     )
 
     if not session:
-        # --- Formulaires de Connexion et d'Inscription ---
-        with st.sidebar.expander("Login / Sign Up"):
-            email = st.text_input("Email")
-            password = st.text_input("Password", type="password")
+        # Use an expander to group the login/signup UI
+        with st.sidebar.expander("Login / Sign Up", expanded=True):
 
-            col1, col2 = st.columns(2)
+            # Create two tabs: one for Login, one for Sign Up
+            login_tab, signup_tab = st.tabs(["Login", "Sign Up"])
 
-            with col1:
-                if st.button("Login", use_container_width=True):
-                    try:
-                        # Tente de connecter l'utilisateur
-                        conn.auth.sign_in_with_password({
-                            "email": email,
-                            "password": password,
-                        })
-                        st.cache_data.clear()
-                        st.rerun() # Rafraîchit la page pour montrer l'état connecté
-                    except Exception as e:
-                        st.error("Invalid login credentials.")
+            with login_tab:
+                # The Login form
+                with st.form("login_form"):
+                    email = st.text_input("Email")
+                    password = st.text_input("Password", type="password")
+                    submitted_login = st.form_submit_button("Login")
 
-            with col2:
-                if st.button("Sign Up", use_container_width=True):
-                    try:
-                        # Tente d'inscrire un nouvel utilisateur
-                        conn.auth.sign_up({
-                            "email": email,
-                            "password": password,
-                        })
-                        st.info("Sign up successful! Please check your email to confirm your account.")
-                    except Exception as e:
-                        st.error(f"Sign up failed: {e}")
+                    if submitted_login:
+                        try:
+                            conn.auth.sign_in_with_password({
+                                "email": email,
+                                "password": password,
+                            })
+                            # Clear any previous errors
+                            if "error" in st.session_state:
+                                del st.session_state.error
+                            st.rerun()
+                        except Exception as e:
+                            st.session_state.error = "Invalid login credentials."
+
+            with signup_tab:
+                # The Sign Up form
+                with st.form("signup_form"):
+                    email_signup = st.text_input("Email", key="signup_email")
+                    password_signup = st.text_input("Password", type="password", key="signup_password")
+                    submitted_signup = st.form_submit_button("Sign Up")
+
+                    if submitted_signup:
+                        try:
+                            conn.auth.sign_up({
+                                "email": email_signup,
+                                "password": password_signup,
+                            })
+                            # Clear any previous errors
+                            if "error" in st.session_state:
+                                del st.session_state.error
+                            st.success("Sign up successful! Please check your email to confirm your account.")
+                        except Exception as e:
+                            st.error(f"Sign up failed: A user with this email may already exist.")
+        
+        # Display any login error messages outside the form/tabs for visibility
+        if "error" in st.session_state and st.session_state.error:
+            st.sidebar.error(st.session_state.error)
+            del st.session_state.error # Clear the error after displaying it
     
     else:
-        # --- Interface pour l'utilisateur connecté ---
+        # ---Display Interface for logged in user ---
         user_email = session.user.email
-        st.sidebar.write("Logged in as:")
+        st.sidebar.header("Logged in as:")
         st.sidebar.markdown(f"**{user_email}**")
         
         if st.sidebar.button("Logout"):
