@@ -139,7 +139,7 @@ def main():
     def plot_seniorites_pie(df_to_plot):
         seniority_counts = df_to_plot['seniority_category'].value_counts()
         color_map = {'Senior/Expert': '#F6FF47', 'Lead/Manager': '#FF6347', 'Not specified': '#3FD655', 'Intern/Apprentice': "#7A8C8D", 'Junior': "#3FCCD6", 'Other': 'blue'}
-        fig = px.pie(values=seniority_counts.values, names=seniority_counts.index, title="Seniority Level Distribution", color=seniority_counts.index, color_discrete_map=color_map)
+        fig = px.pie(values=seniority_counts.values, names=seniority_counts.index, color=seniority_counts.index, color_discrete_map=color_map)
         st.plotly_chart(fig, use_container_width=True)
 
     def plot_salary_pie(df_to_plot):
@@ -149,7 +149,7 @@ def main():
         salary_counts = df_to_plot['is_salary_mentioned'].value_counts()
         label_map = {True: 'Salary Mentioned', False: 'Salary Not Mentioned'}
         color_map = {True: '#3FD655', False: '#FF6347'}
-        fig = px.pie(salary_counts, values=salary_counts.values, names=salary_counts.index.map(label_map), title="Salary Transparency in Job Offers", color=salary_counts.index, color_discrete_map=color_map)
+        fig = px.pie(salary_counts, values=salary_counts.values, names=salary_counts.index.map(label_map), color=salary_counts.index, color_discrete_map=color_map)
         fig.update_traces(textposition='inside', textinfo='percent+label')
         st.plotly_chart(fig, use_container_width=True)
 
@@ -160,7 +160,7 @@ def main():
         consulting_counts = df_to_plot['consulting_status'].value_counts()
         label_map = {'Consulting': 'Consulting', 'Probably consulting': 'Probably consulting', 'Internal position': 'Internal position'}
         color_map = {'Consulting': '#FF6347', 'Probably consulting': '#F6FF47', 'Internal position': '#3FD655'}
-        fig = px.pie(consulting_counts, values=consulting_counts.values, names=consulting_counts.index.map(label_map), title="Consulting Distribution", color=consulting_counts.index, color_discrete_map=color_map)
+        fig = px.pie(consulting_counts, values=consulting_counts.values, names=consulting_counts.index.map(label_map), color=consulting_counts.index, color_discrete_map=color_map)
         fig.update_traces(textposition='inside', textinfo='percent+label')
         st.plotly_chart(fig, use_container_width=True)
     
@@ -172,16 +172,16 @@ def main():
         keywords = keywords[keywords[column_name] != "Not specified"]
         keyword_counts = keywords[column_name].value_counts().nlargest(top_n).sort_values()
         if not keyword_counts.empty:
-            fig = px.bar(keyword_counts, x=keyword_counts.values, y=keyword_counts.index, orientation='h', title=title,  labels={'x': "Number of offers", 'y': column_name}, text_auto=True)
+            fig = px.bar(keyword_counts, x=keyword_counts.values, y=keyword_counts.index, orientation='h', labels={'x': "Number of offers", column_name: "Job Title"}, text_auto=True)
             st.plotly_chart(fig, use_container_width=True)
 
-    def plot_value_counts_plotly(df_to_plot, column_name, top_n=10, title="", extra_hover_data=None):
+    def plot_value_counts_plotly(df_to_plot, column_name, top_n=10, title=None, extra_hover_data=None):
         """
         Plots a bar chart of value counts.
         Optionally includes extra data on hover, like aliases.
         """
         if df_to_plot.empty:
-            st.warning(f"No data to display for '{title}'.")
+            st.warning(f"No data to display for this chart.")
             return
 
         # --- Aggregation Logic ---
@@ -210,8 +210,9 @@ def main():
             plot_df,
             x='count',
             y=column_name,
+            labels={'count':'count', column_name:column_name.replace('_', ' ').title()},
             orientation='h',
-            title=title,
+            title=title if title else None, 
             text='count',
             hover_data=hover_columns
         )
@@ -227,6 +228,8 @@ def main():
             
         fig.update_traces(hovertemplate=hovertemplate)
         fig.update_layout(yaxis={'categoryorder':'total ascending'})
+        if not title:
+            fig.update_layout(margin=dict(t=20))
         st.plotly_chart(fig, use_container_width=True)
 
     # --- Helper functions to load presets ---
@@ -465,7 +468,6 @@ def main():
     if st.session_state.page == 'Skills Summary':
         st.title("📊 Market Skills Summary")
         st.write(f"Analysis of **{len(df_display)}** filtered job offers.")
-        st.header("Most In-Demand Skills")
 
         # 1. Determine the current user's ID (either logged-in or anonymous)
         if session:
@@ -506,7 +508,6 @@ def main():
                     df_to_plot=filtered_skills_df,
                     column_name='skill',
                     top_n=15,
-                    title="Top 15 Most In-Demand Skills (All Categories)",
                     # Pass the extra hover data config
                     extra_hover_data={"Skill category": "category", "Aliases": "aliases_string"}
                 )
@@ -514,19 +515,27 @@ def main():
 
             # --- Display the category-specific charts with aliases on hover ---
             st.header("Top Skills by Category")
-            for db_category in sorted(user_relevant_categories):
-                category_skills_df = filtered_skills_df[filtered_skills_df['category'] == db_category]
+
+            # Create a list of tab names from your unique categories
+            tab_names = [category.replace('_', ' ').title() for category in sorted(user_relevant_categories)]
+
+            # Create the tabs
+            tabs = st.tabs(tab_names)
+
+            for tab, db_category in zip(tabs, sorted(user_relevant_categories)):
+                with tab:
+                    category_skills_df = filtered_skills_df[filtered_skills_df['category'] == db_category]
                 
-                if not category_skills_df.empty:
-                    display_title = f"Top Skills in {db_category.replace('_', ' ').title()}"
-                    plot_value_counts_plotly(
-                        df_to_plot=category_skills_df,
-                        column_name='skill',
-                        top_n=10,
-                        title=display_title,
-                        # Pass the same extra hover data config here too
-                        extra_hover_data={"Aliases": "aliases_string"}
-                    )
+                    if not category_skills_df.empty:
+                        display_title = f"Top Skills in {db_category.replace('_', ' ').title()}"
+                        plot_value_counts_plotly(
+                            df_to_plot=category_skills_df,
+                            column_name='skill',
+                            top_n=10,
+                            title=display_title,
+                            # Pass the same extra hover data config here too
+                            extra_hover_data={"Aliases": "aliases_string"}
+                        )
 
     elif st.session_state.page == 'Job Offer Breakdown':
         st.title("📄 Job Offer Breakdown")
@@ -534,7 +543,7 @@ def main():
         col1, col2 = st.columns(2)
         with col1:
             st.header("Job Titles")
-            plot_top_keywords_plotly(df_display, 'work_titles_final', top_n=15, title="Top Job Titles")
+            plot_top_keywords_plotly(df_display, 'work_titles_final', top_n=15)
         with col2:
             st.header("Seniority Levels")
             plot_seniorites_pie(df_display)
@@ -542,7 +551,7 @@ def main():
         col1, col2 = st.columns(2)
         with col1:
             st.header("Contract Type")
-            plot_value_counts_plotly(df_display, 'schedule_type', top_n=15, title="Top Contract Types")
+            plot_value_counts_plotly(df_display, 'schedule_type', top_n=15)
         with col2:
             st.header("Consulting")
             plot_consulting_pie(df_display)
@@ -550,7 +559,7 @@ def main():
         col1, col2 = st.columns(2)
         with col1:
             st.header("Top Company Categories")
-            plot_value_counts_plotly(df_display, 'company_category', top_n=15, title="Top Categories")
+            plot_value_counts_plotly(df_display, 'company_category', top_n=15)
         with col2:
             st.header("Salaries")
             plot_salary_pie(df_display)
@@ -558,10 +567,10 @@ def main():
         col1, col2 = st.columns(2)
         with col1:
             st.header("Company Analysis")
-            plot_value_counts_plotly(df_display, 'company_name', top_n=15, title="Top Companies")
+            plot_value_counts_plotly(df_display, 'company_name', top_n=15)
         with col2:
             st.header("Top Activities")
-            plot_value_counts_plotly(df_display, 'activity_section_details', top_n=15, title="Top Activities")
+            plot_value_counts_plotly(df_display, 'activity_section_details', top_n=15)
         st.markdown("---") 
 
     elif st.session_state.page == 'Explore offers':
