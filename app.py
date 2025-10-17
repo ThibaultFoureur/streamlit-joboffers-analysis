@@ -175,18 +175,68 @@ def main():
             fig = px.bar(keyword_counts, x=keyword_counts.values, y=keyword_counts.index, orientation='h', title=title,  labels={'x': "Number of offers", 'y': column_name}, text_auto=True)
             st.plotly_chart(fig, use_container_width=True)
 
-    def plot_value_counts_plotly(df_to_plot, column_name, top_n=10, title=""):
-        if column_name not in df_to_plot.columns or df_to_plot[column_name].empty:
+    def plot_value_counts_plotly(df_to_plot, column_name, top_n=10, title="", hover_column=None):
+        """
+        Plots a bar chart of value counts for a specified column.
+        Optionally includes data from another column on hover.
+        """
+        if df_to_plot.empty:
             st.warning(f"No data to display for '{title}'.")
             return
-        series_to_plot = df_to_plot[column_name].fillna('Not specified')
-        value_counts = series_to_plot.value_counts().nlargest(top_n).sort_values()
-        if not value_counts.empty:
-            fig = px.bar(value_counts, x=value_counts.values, y=value_counts.index, orientation='h', title=title, labels={'x': "Number of offers", 'y': column_name.replace('_', ' ').capitalize()}, text_auto=True)
-            fig.update_layout(yaxis={'categoryorder':'total ascending'})
-            st.plotly_chart(fig, use_container_width=True)
+
+        # --- NEW: Conditional logic for hover data ---
+        if hover_column:
+            # --- Logic for the complex "Overall Top Skills" chart ---
+            # 1. Count skill occurrences
+            value_counts = df_to_plot[column_name].value_counts().reset_index()
+            value_counts.columns = [column_name, 'count']
+
+            # 2. For each skill, aggregate the unique hover values into a string
+            hover_data = df_to_plot.groupby(column_name)[hover_column].unique().apply(', '.join).reset_index()
+            
+            # 3. Merge the counts and hover data
+            plot_df = pd.merge(value_counts, hover_data, on=column_name)
+            
+            # 4. Get the top N skills and sort for plotting
+            plot_df = plot_df.nlargest(top_n, 'count').sort_values(by='count')
+
+            # 5. Create the plot with hover_data
+            fig = px.bar(
+                plot_df,
+                x='count',
+                y=column_name,
+                orientation='h',
+                title=title,
+                text='count',
+                hover_data=[hover_column] # Pass the hover column to Plotly
+            )
+            
+            # Customize the hover label for clarity
+            fig.update_traces(
+                hovertemplate=f'<b>{column_name.title()}:</b> %{{y}}<br><b>Count:</b> %{{x}}<br><b>{hover_column.title()}:</b> %{{customdata[0]}}'
+            )
         else:
-            st.info(f"No data found for '{title}' in this selection.")
+            # --- Original logic for simple value count charts ---
+            series_to_plot = df_to_plot[column_name].fillna('Not specified')
+            value_counts = series_to_plot.value_counts().nlargest(top_n).sort_values()
+            
+            if value_counts.empty:
+                st.info(f"No data found for '{title}' in this selection.")
+                return
+                
+            fig = px.bar(
+                value_counts,
+                x=value_counts.values,
+                y=value_counts.index,
+                orientation='h',
+                title=title,
+                labels={'x': "Number of offers", 'y': column_name.replace('_', ' ').capitalize()},
+                text_auto=True
+            )
+
+        # Common layout updates for both chart types
+        fig.update_layout(yaxis={'categoryorder':'total ascending'})
+        st.plotly_chart(fig, use_container_width=True)
 
     # --- Helper functions to load presets ---
     @st.cache_data(ttl=300)
@@ -430,7 +480,23 @@ def main():
             st.info("No technical skills were found in the selected job offers.")
         else:
             skills_df = pd.DataFrame(all_skills_list)
-            
+
+            filtered_skills_df = skills_df[skills_df['category'].isin(user_relevant_categories)]
+
+            # --- Display the combined chart for all skills ---
+            st.header("Overall Top Skills")
+            plot_value_counts_plotly(
+                df_to_plot=filtered_skills_df,
+                column_name='skill',
+                top_n=15,  # Show more skills in the combined view
+                title="Top 15 Most In-Demand Skills (All Categories)",
+                hover_column='category'
+            )
+            st.markdown("---")
+
+            # --- Display the category-specific charts (existing logic) ---
+            st.header("Top Skills by Category")
+
             # 4. Loop through the USER'S categories and create a plot for each one
             for db_category in sorted(user_relevant_categories):
                 # Filter the DataFrame for skills matching the user's category
