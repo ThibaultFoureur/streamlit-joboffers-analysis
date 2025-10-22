@@ -634,17 +634,38 @@ def main():
             safe_company_info = [i for i in current_profile_values.get('all_company_info', []) if i in all_company_info_options]
             default_salary = current_profile_values.get("min_salary")
 
-            st.session_state.profile['my_skills'] = st.multiselect('My Skills (+3 pts/skill):', options=all_skills, default=safe_skills)
-            st.session_state.profile['target_roles'] = st.multiselect('My Target Roles (+10 pts):', options=all_work_titles, default=safe_roles)
-            st.session_state.profile['all_job_info'] = st.multiselect('Job Info (+5 pts):', options=all_job_info_options, default=safe_job_info)
-            st.session_state.profile['all_company_info'] = st.multiselect("Company Info (+5 pts):", options=all_company_info_options, default=safe_company_info)
+            # --- ORGANIZED INPUTS ---
+            st.subheader("Personal Preferences")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.session_state.profile['my_skills'] = st.multiselect(
+                    'My Skills (+3 pts/skill):', 
+                    options=all_skills, 
+                    default=safe_skills
+                )
+            with col2:
+                st.session_state.profile['target_roles'] = st.multiselect(
+                    'My Target Roles (+10 pts):', 
+                    options=all_work_titles, 
+                    default=safe_roles
+                )
+
+            st.subheader("Job Preferences")
+            st.session_state.profile['all_job_info'] = st.multiselect(
+                'Preferred Job Info (seniority, contract, etc.) (+5 pts):', 
+                options=all_job_info_options, 
+                default=safe_job_info
+            )
             st.session_state.profile['min_salary'] = st.number_input(
                 'Minimum annual salary in € (+5/10 pts):',
-                value=default_salary or 0,
-                placeholder="Input a minimum salary...",
-                min_value=0,
-                step=1000,
-                format="%d"
+                min_value=0, step=1000, value=default_salary or 0
+            )
+
+            st.subheader("Company Preferences")
+            st.session_state.profile['all_company_info'] = st.multiselect(
+                "Preferred Company Info (size, sector) (+5 pts):", 
+                options=all_company_info_options, 
+                default=safe_company_info
             )
 
             # --- NEW: Save Search Profile button ---
@@ -715,39 +736,79 @@ def main():
             max_possible_score += 10
         if max_possible_score == 0: max_possible_score = 1
 
-        edited_df = st.data_editor(
-            st.session_state.df_editor_state,
-            column_config={
-                "match_score": st.column_config.ProgressColumn(
-                    "Score", help="Relevance score based on your profile",
-                    min_value=0, max_value=max_possible_score, width="small"
-                ),
-                "title": st.column_config.Column(pinned=True, width="medium"),
-                "company_name": st.column_config.Column(pinned=True, width="small"),
-                "status": st.column_config.SelectboxColumn(
-                    "Status", width="small", options=["Contacted", "Refused", "Positive"],
-                    required=False, pinned=True,
-                ),
-                "contact_date": st.column_config.DateColumn("Contact Date", width="small"),
-                "annual_min_salary": st.column_config.NumberColumn("Min Salary (€)", format="€%d"),
-                "annual_max_salary": st.column_config.NumberColumn("Max Salary (€)", format="€%d"),
-                "apply_link_1": st.column_config.LinkColumn("Apply Link 1"),
-                "job_id": None
-            },
-            hide_index=True, use_container_width=True, key="job_editor"
+        # Define all available columns and a sensible list of defaults
+        all_columns = df_prepared.columns.tolist()
+        default_columns = [
+            'posted_at', 'match_score', 'title', 'company_name', 'status', 'contact_date', 
+            'annual_min_salary', 'location', 'schedule_type', 'apply_link_1','apply_link_2'
+        ]
+        
+        # Ensure default columns exist in the DataFrame before using them
+        valid_default_columns = [col for col in default_columns if col in all_columns]
+
+        selected_columns = st.multiselect(
+            "Select columns to display:",
+            options=all_columns,
+            default=valid_default_columns
         )
 
-        if not edited_df.equals(st.session_state.df_editor_state):
-            df_updates = edited_df.copy()
-            for index, row in df_updates.iterrows():
-                if index in st.session_state.df_editor_state.index:
-                    original_row = st.session_state.df_editor_state.loc[index]
-                    original_status = original_row['status'] if pd.notna(original_row['status']) else ""
-                    current_status = row['status'] if pd.notna(row['status']) else ""
-                    if current_status == 'Contacted' and original_status != 'Contacted':
-                        df_updates.loc[index, 'contact_date'] = date.today()
-            st.session_state.df_editor_state = df_updates.copy()
-            st.rerun()
+        # The data editor now uses the filtered list of columns
+        if not selected_columns:
+            st.warning("Please select at least one column to display.")
+
+        else:
+            edited_df = st.data_editor(
+                st.session_state.df_editor_state[selected_columns], # Display only selected columns
+                column_config={
+                    "match_score": st.column_config.ProgressColumn(
+                        "Score", help="Relevance score based on your profile",
+                        min_value=0, max_value=max_possible_score, width="small"
+                    ),
+                    "title": st.column_config.Column(pinned=True, width="medium"),
+                    "company_name": st.column_config.Column(pinned=True, width="small"),
+                    "status": st.column_config.SelectboxColumn(
+                        "Status", width="small", options=["Contacted", "Refused", "Positive"],
+                        required=False, pinned=True,
+                    ),
+                    "contact_date": st.column_config.DateColumn("Contact Date", width="small"),
+                    "annual_min_salary": st.column_config.NumberColumn("Min Salary (€)", format="€%d"),
+                    "annual_max_salary": st.column_config.NumberColumn("Max Salary (€)", format="€%d"),
+                    "apply_link_1": st.column_config.LinkColumn(
+                    "Apply Link 1",
+                    # This regex captures and displays the domain name
+                    display_text="https?://(?:www\.)?([^/]+)"
+                    ),
+                    "apply_link_2": st.column_config.LinkColumn(
+                        "Apply Link 2",
+                        display_text="https?://(?:www\.)?([^/]+)"
+                    ),
+                    "job_id": None
+                },
+                hide_index=True, 
+                use_container_width=True, 
+                key="job_editor"
+            )
+
+            if not edited_df.equals(st.session_state.df_editor_state[selected_columns]):
+                # Create a copy of the full DataFrame from session state
+                df_updates = st.session_state.df_editor_state.copy()
+
+                # Update the columns that were edited
+                for col in selected_columns:
+                    if col in ['status', 'contact_date', 'notes']: # Only update editable columns
+                        df_updates[col] = edited_df[col]
+
+                for index, row in df_updates.iterrows():
+                    if index in st.session_state.df_editor_state.index:
+                        original_row = st.session_state.df_editor_state.loc[index]
+                        original_status = original_row['status'] if pd.notna(original_row['status']) else ""
+                        current_status = row['status'] if pd.notna(row['status']) else ""
+                        if current_status == 'Contacted' and original_status != 'Contacted':
+                            df_updates.loc[index, 'contact_date'] = date.today()
+                
+                # Save the fully updated DataFrame back to session state
+                st.session_state.df_editor_state = df_updates.copy()
+                st.rerun()
 
         if st.button("Save My Progress to Supabase"):
             current_user_id = conn.auth.get_session().user.id if conn.auth.get_session() else None
