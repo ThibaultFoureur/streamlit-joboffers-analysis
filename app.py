@@ -776,17 +776,17 @@ def main():
                     "apply_link_1": st.column_config.LinkColumn(
                     "Apply Link 1",
                     # This regex captures and displays the domain name
-                    display_text="https?://(?:www\.)?([^/]+)"
+                    display_text=r"https?://(?:www\.)?([^/]+)"
                     ),
                     "apply_link_2": st.column_config.LinkColumn(
                         "Apply Link 2",
-                        display_text="https?://(?:www\.)?([^/]+)"
+                        display_text=r"https?://(?:www\.)?([^/]+)"
                     ),
                     "job_id": None
                 },
                 hide_index=True, 
-                use_container_width=True, 
-                key="job_editor"
+                width='stretch', 
+                key='job_editor'
             )
 
             if not edited_df.equals(st.session_state.df_editor_state[selected_columns]):
