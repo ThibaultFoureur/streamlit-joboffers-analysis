@@ -53,7 +53,6 @@ renamed_and_cast AS (
         END AS posted_at,
 
         -- Extract from JSONB fields
-        detected_extensions ->> 'posted_at' AS posted_at,
         detected_extensions ->> 'salary' AS salary,
         detected_extensions ->> 'schedule_type' AS original_schedule_type,
         
