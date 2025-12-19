@@ -7,11 +7,19 @@ on:
       max_pages:
         description: 'Max pages to scrape per query'
         required: true
-        default: '5' # The default for a manual run is 5
+        default: '1' # The default for a manual run is 1
       run_mode:
         description: "'full_run' (extract + dbt) or 'dbt_only' (just dbt)"
         required: true
+        type: choice
+        options:
+          - full_run
+          - dbt_only
         default: 'full_run'
+      user_scope:
+        description: "'all' or specific user_id"
+        required: true
+        default: 'all'
 
   # Schedules the workflow to run every day at 2 AM (UTC)
   schedule:
@@ -36,10 +44,14 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run Extraction Script
+        # Run this ONLY if it's a scheduled run OR if the user selected 'full_run'
+        if: ${{ github.event_name == 'schedule' || inputs.run_mode == 'full_run' }}
         env: # Step 4: Runs the extraction script, passing secrets as environment variables
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+          MAX_PAGES: ${{ inputs.max_pages || '1' }} 
+          USER_SCOPE: ${{ inputs.user_scope || 'all' }}
         run: python scripts/extraction.py
 
       - name: Setup dbt profile

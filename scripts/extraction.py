@@ -7,8 +7,8 @@ from serpapi import GoogleSearch
 import requests
 import re
 
-# --- CONSTANTS ---
-MAX_PAGES_PER_QUERY = int(os.environ.get('MAX_PAGES_PER_QUERY', '1'))
+max_pages_per_query = int(os.getenv('MAX_PAGES', '1'))
+user_scope = os.getenv("user_scope", "all")
 
 # --- SERVICE CONNECTIONS ---
 load_dotenv()
@@ -17,6 +17,8 @@ supabase_key: str = os.getenv("SUPABASE_SERVICE_KEY")
 supabase: Client = create_client(supabase_url, supabase_key)
 serpapi_key: str = os.getenv("SERPAPI_KEY")
 print("✅ Service connections established.")
+
+print(f"Starting extraction with MAX_PAGES={max_pages_per_query} and SCOPE={user_scope}")
 
 # --- JOB EXTRACTION FUNCTIONS ---
 def fetch_raw_jobs_paginated(query: str, max_pages: int) -> list:
@@ -112,7 +114,13 @@ if __name__ == "__main__":
     # UPDATED: Fetch all user search configurations from Supabase
     print("Fetching user search configurations...")
     try:
-        configs_response = supabase.table("user_configs").select("user_id, search_queries, search_location").execute()
+        query = supabase.table("user_configs").select("user_id, search_queries, search_location")
+
+        # Apply filter ONLY if user_scope is not 'all'
+        if user_scope != "all":
+            query = query.eq("user_id", user_scope)
+
+        configs_response = query.execute()
         search_configs = configs_response.data
         if not search_configs:
             print("⏹️ No active user configurations found. Exiting job search.")
@@ -152,7 +160,7 @@ if __name__ == "__main__":
                 # UPDATED: Dynamically build the query string
                 query = f'"{title}" {location}'
                 
-                jobs_from_api = fetch_raw_jobs_paginated(query, MAX_PAGES_PER_QUERY)
+                jobs_from_api = fetch_raw_jobs_paginated(query, max_pages_per_query)
                 if not jobs_from_api: continue
 
                 df = pd.DataFrame(jobs_from_api)
