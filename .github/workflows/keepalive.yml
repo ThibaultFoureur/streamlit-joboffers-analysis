@@ -14,7 +14,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Install Postgres Client
-        run: sudo apt-get install -p postgresql-client
+        run: sudo apt-get install -y postgresql-client
 
       - name: Ping Database
         run: |
