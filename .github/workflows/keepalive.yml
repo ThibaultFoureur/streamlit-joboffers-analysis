@@ -17,6 +17,10 @@ jobs:
         run: sudo apt-get install -y postgresql-client
 
       - name: Ping Database
+        env:
+            PGPASSWORD: ${{ secrets.DBT_PASSWORD }}
+            DB_HOST: ${{ secrets.DBT_HOST }}
+            DB_USER: ${{ secrets.DBT_USER }}
         run: |
           # Simple query to wake the DB
-          PGPASSWORD=${{ secrets.DB_PASSWORD }} psql -h ${{ secrets.DB_HOST }} -U ${{ secrets.DB_USER }} -d postgres -c "SELECT 1;"
+          psql -h "$DB_HOST" -U "$DB_USER" -d postgres -p 6543 -c "SELECT 1;"
