@@ -575,6 +575,20 @@ def main():
 
     elif st.session_state.page == 'Explore offers':
         st.title(" 🔎 Explore Offers by Relevance")
+
+        st.subheader("📅 Filter by Recency")
+        # Define options: Label -> Days
+        recency_options = {"Last 15 days": 15, "Last 30 days": 30, "Last 60 days": 60, "All time": 9999}
+        
+        # We use a segmented control for a modern "button-like" feel
+        selected_label = st.segmented_control(
+            "Show offers posted within:",
+            options=list(recency_options.keys()),
+            default="Last 60 days"
+        )
+        days_limit = recency_options[selected_label]
+        # Define the "New" threshold (7 days)
+        new_threshold = pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=7)
         
         with st.expander("Configure my search profile and match score"):
             # --- Search Profile Preset Loading Logic ---
@@ -694,6 +708,25 @@ def main():
                             st.error(f"Error saving profile: {e}")
                     else:
                         st.warning("Please enter a name for your profile.")
+
+        # --- Apply Date Filtering ---
+        # 1. Ensure posted_at is a datetime object (handles dbt strings or timestamps)
+        df_display['posted_at_dt'] = pd.to_datetime(df_display['posted_at'], errors='coerce', utc=True)
+        
+        # 2. Calculate the cutoff date
+        cutoff_date = pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=days_limit)
+        
+        # 3. Filter the dataframe
+        # We keep rows that are newer than cutoff OR rows where date is missing (optional)
+        df_display = df_display[df_display['posted_at_dt'] >= cutoff_date].copy()
+
+        # We check if the date is valid (not NaT) and within the threshold
+        df_display['title'] = df_display.apply(
+            lambda row: f"🆕 {row['title']}" 
+            if pd.notnull(row['posted_at_dt']) and row['posted_at_dt'] >= new_threshold 
+            else row['title'], 
+            axis=1
+        )
         
         df_display['match_score'] = df_display.apply(lambda row: calculate_match_score(row, st.session_state.profile), axis=1)
         st.write(f"Displaying **{len(df_display)}** filtered offers.")
