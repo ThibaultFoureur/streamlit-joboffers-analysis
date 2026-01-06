@@ -800,7 +800,7 @@ def main():
                     "title": st.column_config.Column(pinned=True, width="medium"),
                     "company_name": st.column_config.Column(pinned=True, width="small"),
                     "status": st.column_config.SelectboxColumn(
-                        "Status", width="small", options=["Contacted", "Refused", "Positive"],
+                        "Status", width="small", options=["📞 Contacted", "❌ Refused", "✅ Positive", "⌛ Expired", "🙅 Not interested"],
                         required=False, pinned=True,
                     ),
                     "contact_date": st.column_config.DateColumn("Contact Date", width="small"),
@@ -836,7 +836,7 @@ def main():
                         original_row = st.session_state.df_editor_state.loc[index]
                         original_status = original_row['status'] if pd.notna(original_row['status']) else ""
                         current_status = row['status'] if pd.notna(row['status']) else ""
-                        if current_status == 'Contacted' and original_status != 'Contacted':
+                        if current_status == "📞 Contacted" and original_status != "📞 Contacted":
                             df_updates.loc[index, 'contact_date'] = date.today()
                 
                 # Save the fully updated DataFrame back to session state
