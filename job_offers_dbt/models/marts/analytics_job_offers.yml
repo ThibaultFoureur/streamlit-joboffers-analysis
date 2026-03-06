@@ -2,68 +2,98 @@ version: 2
 
 models:
   - name: analytics_job_offers
-    description: "The final, analysis-ready table containing enriched job offers. This is the primary table to be queried by the Streamlit application and other BI tools. It joins job and company information and applies final business logic."
+    description: >
+      The final, analysis-ready table containing enriched job offers. 
+      This is the primary table to be queried by the Streamlit application and other BI tools. 
+      It joins job and company information and applies final business logic.
+    config:
+      contract:
+        enforced: true # Enforces that the SQL matches this exact schema
     
     columns:
       - name: job_id
+        data_type: text
         description: "The unique identifier for the job offer. This serves as the primary key."
         tests:
           - unique
           - not_null
 
       - name: title
+        data_type: text
         description: "The original title of the job offer."
         tests:
           - not_null
 
       - name: company_name
+        data_type: text
         description: "The name of the company posting the job."
         tests:
           - not_null
 
       - name: company_category
-        description: "The size category of the company (e.g., PME, ETI, GE)."
+        data_type: text
+        description: "The size category of the company (e.g., SME, Mid-cap, Large Corp)."
 
       - name: activity_section_details
+        data_type: text
         description: "A human-readable description of the company's main business sector."
 
       - name: location
+        data_type: text
         description: "The geographical location of the job."
 
       - name: via
-        description: "The platform or job board where the offer was originally found (e.g., 'LinkedIn', 'Welcome to the Jungle')."
+        data_type: text
+        description: "The platform or job board where the offer was originally found (e.g., 'LinkedIn', 'Free-Work')."
 
       - name: is_salary_mentioned
+        data_type: boolean
         description: "A boolean flag that is TRUE if a salary was detected in the job posting."
         tests:
           - not_null
 
       - name: salary
-        description: "The salary information, if available."
+        data_type: text
+        description: "The raw salary information string, if available."
+
+      - name: annual_min_salary
+        data_type: numeric
+        description: "The calculated minimum annual salary (standardized to EUR/year)."
+
+      - name: annual_max_salary
+        data_type: numeric
+        description: "The calculated maximum annual salary (standardized to EUR/year)."
+
+      - name: work_titles_final
+        data_type: text[] # Postgres array type
+        description: "Standardized array of job categories (e.g., 'Data Analyst', 'Analytics Engineer')."
+        tests:
+          - not_null
 
       - name: schedule_type
-        description: "The type of employment contract (e.g., 'À plein temps', 'Temps partiel')."
+        data_type: text
+        description: "The type of employment contract (e.g., 'Full-time', 'Internship')."
 
       - name: posted_at
-        description: "A string indicating when the job was posted (e.g., 'il y a 11 heures')."
+        data_type: timestamptz
+        description: "Standardized timestamp of when the job was posted, parsed from relative strings."
 
       - name: seniority_category
+        data_type: text
         description: "The standardized seniority level for the role (e.g., 'Senior/Expert', 'Junior')."
         tests:
           - not_null
           - accepted_values:
               values: ['Intern/Apprentice', 'Senior/Expert', 'Lead/Manager', 'Junior', 'Not specified']
 
-      - name: languages
-        description: "An array of programming language keywords found in the job's text."
-
-      - name: bi_tools
-        description: "An array of Business Intelligence tool keywords found in the job's text."
-
-      - name: cloud_platforms
-        description: "An array of cloud platform keywords found in the job's text."
+      - name: found_skills
+        data_type: jsonb
+        description: >
+          A JSONB object containing categorized keywords found in the job's text 
+          (e.g., {"bi_tools": ["Power BI"], "languages": ["SQL"]}).
 
       - name: consulting_status
+        data_type: text
         description: "The final, classified status of the job: 'Consulting', 'Probably consulting', or 'Internal position'."
         tests:
           - not_null
@@ -71,13 +101,13 @@ models:
               values: ['Consulting', 'Probably consulting', 'Internal position']
 
       - name: description
+        data_type: text
         description: "The full, raw text description of the job offer."
 
-      - name: full_text
-        description: "A concatenation of the title and description, used for keyword searching."
-
       - name: apply_link_1
+        data_type: text
         description: "The primary application link for the job."
 
       - name: apply_link_2
+        data_type: text
         description: "A secondary application link, if available."
