@@ -1,0 +1,14 @@
+version: 2
+
+models:
+  - name: stg_user_configs
+    description: "User search preferences and skill keywords configuration"
+    columns:
+      - name: user_id
+        description: "Primary key: unique identifier for the user"
+        tests:
+          - unique
+          - not_null
+          
+      - name: search_skills
+        description: "JSONB object containing categories and skill aliases"

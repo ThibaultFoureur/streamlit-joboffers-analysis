@@ -1,47 +1,49 @@
--- This is the final model, ready for analysis and for the Streamlit app.
+-- Final gold model for Streamlit analysis
+WITH enriched_jobs AS (
+    SELECT * FROM {{ ref('int_jobs_enriched') }}
+),
 
-with joined as (
-
-    select * from {{ ref('int_jobs_with_companies') }}
-
+companies AS (
+    SELECT * FROM {{ ref('stg_companies') }}
 ),
 
 final as (
 
     select
         -- Select and reorder the final columns
-        title,
-        company_name,
-        company_category,
-        activity_section_details,
-        location,
-        via,
-        salary is not null as is_salary_mentioned, -- Business logic moved to dbt
-        salary,
-        annual_min_salary,
-        annual_max_salary,
-        work_titles_final,
-        schedule_type,
-        posted_at,
-        seniority_category,
-        found_skills,
+        j.title,
+        j.company_name,
+        c.company_category,
+        c.activity_section_details,
+        j.location,
+        j.via,
+        j.is_salary_mentioned,
+        j.salary,
+        j.annual_min_salary,
+        j.annual_max_salary,
+        j.work_titles_final,
+        j.schedule_type,
+        j.posted_at,
+        j.seniority_category,
+        j.found_skills,
 
         -- Final business logic for consulting status
         CASE
-            WHEN lower(title) ILIKE '%consult%' THEN 'Consulting'
-            WHEN (lower(title) ILIKE ANY (ARRAY['%consultant%', '%consulting%'])) AND is_consulting_company THEN 'Consulting'
-            WHEN (lower(title) ILIKE ANY (ARRAY['%consultant%', '%consulting%'])) OR is_consulting_company THEN 'Probably consulting'
+            WHEN lower(j.title) ILIKE '%consult%' THEN 'Consulting'
+            WHEN (lower(j.title) ILIKE ANY (ARRAY['%consultant%', '%consulting%'])) AND c.is_consulting_company THEN 'Consulting'
+            WHEN (lower(j.title) ILIKE ANY (ARRAY['%consultant%', '%consulting%'])) OR c.is_consulting_company THEN 'Probably consulting'
             ELSE 'Internal position'
         END as consulting_status,
 
         -- Keep IDs and useful text fields at the end
-        description,
-        full_text,
-        job_id,
-        apply_link_1,
-        apply_link_2
+        j.description,
+        --j.full_text,
+        j.job_id,
+        j.apply_link_1,
+        j.apply_link_2
 
-    from joined
+    FROM enriched_jobs j
+    LEFT JOIN companies c ON j.company_name = c.company_name
 )
 
 select * from final

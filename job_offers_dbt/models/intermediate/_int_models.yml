@@ -1,0 +1,34 @@
+version: 2
+
+models:
+  - name: int_jobs_dates
+    description: "Standardized job posting dates parsed from relative strings."
+    columns:
+      - name: job_id
+        tests:
+          - not_null
+          - unique
+      - name: posted_at
+        tests:
+          - not_null
+
+  - name: int_jobs_salaries
+    description: "Annualized salary calculations (min/max) based on period multipliers."
+    columns:
+      - name: annual_min_salary
+        tests:
+          - dbt_utils.accepted_range: 
+              min_value: 0
+              max_value: 500000 
+              config:
+                severity: warn
+                warn_if: ">0"      
+                error_if: ">100"
+
+  - name: int_jobs_enriched
+    description: "Final intermediate model with seniority and schedule categorizations."
+    columns:
+      - name: seniority_category
+        tests:
+          - accepted_values:
+              values: ['Intern/Apprentice', 'Senior/Expert', 'Lead/Manager', 'Junior', 'Not specified']

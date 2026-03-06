@@ -1,54 +1,51 @@
-version: 2
+version: 3
 
 models:
   - name: stg_jobs
-    description: "Cleans, casts, and enriches raw job offer data. This model is the first layer of transformation, turning raw JSON and text fields into structured columns like categories, skills, and application links. It serves as the foundational layer for all downstream analysis."
+    description: "Raw job offer data extracted from the Supabase source."
     
     columns:
       - name: job_id
-        description: "The unique identifier for a job offer, provided by the source API. This is the primary key for job offers."
+        description: "The unique identifier for a job offer. Primary key."
         tests:
           - unique
           - not_null
 
       - name: title
-        description: "The original, raw title of the job offer."
+        description: "The original job title."
         tests:
           - not_null
 
       - name: company_name
-        description: "The name of the company posting the job offer."
+        description: "The name of the company posting the job."
         tests:
           - not_null
 
-      - name: work_titles_final
-        description: "An array of standardized job categories (e.g., Data Analyst, BI Specialist) derived from the job title. An offer can belong to multiple categories."
-        tests:
-          - not_null # Ensures the array itself is never null.
+      - name: location
+        description: "The raw location string (e.g., 'Paris', 'Remote')."
 
-      - name: seniority_category
-        description: "The single, standardized seniority level (e.g., Senior/Expert, Junior) derived from the job title."
-        tests:
-          - not_null
-          - accepted_values:
-              values: ['Intern/Apprentice', 'Senior/Expert', 'Lead/Manager', 'Junior', 'Not specified']
-      
-      - name: schedule_type
-        description: "The type of employment schedule (e.g., 'À plein temps', 'Temps partiel'). Extracted from JSON."
-        # You could add an accepted_values test here too as you discover all possible values.
+      - name: description
+        description: "The full text of the job description."
 
-      - name: posted_at
-        description: "The string indicating when the job was posted (e.g., 'il y a 11 heures')."
-
-      - name: found_skills
-        description: "The array of skill category json object and its list of matched skill."
-
-      - name: apply_link_1
-        description: "The primary application link for the job offer."
-        # A simple not_null test could be too strict, as some jobs might not have a link.
-        # A custom test to check for valid URL format could be added later.
+      - name: via
+        description: "The source platform (e.g., 'via LinkedIn')."
 
       - name: created_at
-        description: "The timestamp when the raw job offer was first loaded into the database."
+        description: "Timestamp when the record was first inserted into Supabase."
         tests:
           - not_null
+
+      - name: raw_posted_at
+        description: "The relative posting time as a string (e.g., 'il y a 11 heures'). Extracted from detected_extensions."
+
+      - name: raw_salary
+        description: "The raw salary string (e.g., '350 € par jour'). Extracted from detected_extensions."
+
+      - name: raw_schedule_type
+        description: "The raw schedule string (e.g., 'À plein temps'). Extracted from detected_extensions."
+
+      - name: apply_link_1
+        description: "The primary application URL."
+
+      - name: apply_link_2
+        description: "The secondary application URL if available."
